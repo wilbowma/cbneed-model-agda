@@ -142,7 +142,9 @@ modelG ((fst₁ , snd₁) ∷ x₁) = (fst₁ , (El snd₁)) ∷ (modelG x₁)
 model : {G : Gamma} {A : Type}
       -> Term G A
       -> Σ (Scope Set) (λ S2 -> M {S1 = (modelG G)} {S2} (El A))
-model {G} {A = A} (var n x) = (modelG G) , get n {model-in-scope G x}
+model {G} {A = A} (var n x) = (n , (M (El A))) ∷ (modelG G) ,
+  bindf (get n {model-in-scope G x})
+        λ v -> (bindf (set n (return v)) (λ ⊤ -> (return v)))
   where
   model-in-scope : (G : Gamma) -> InScope G n A -> InScope (modelG G) n (El A)
   model-in-scope [] pf with impossibleScope pf
