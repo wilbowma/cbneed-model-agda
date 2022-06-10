@@ -170,3 +170,12 @@ model (tapp term₁ term₂) =
   let r1 = (model term₁) in
   let r2 = (model term₂) in
     (fst r1) , bindf (snd r1) (λ f -> (f (snd r2)))
+
+-- For closed terms
+model' : {A : Type}
+      -> Term [] A
+      -> Σ (Scope Set) (λ S2 -> M {S1 = []} {S2} (El A))
+model' e = model e
+
+test : (run (snd (model' (nlit 5)))) ≡ 5
+test = refl
