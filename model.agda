@@ -5,13 +5,13 @@
 open import Data.Nat
 open import Data.Product using (_×_; _,_; Σ) renaming (proj₁ to fst) renaming (proj₂ to snd)
 open import Data.Bool
-open import Data.Sum renaming (map to sum-map)
-open import Agda.Primitive renaming (_⊔_ to lmax)
-open import Data.String renaming (length to string-length) renaming (_++_ to string-append)
-open import Data.List using (List; _∷_; []; length; map; _++_)
-open import Agda.Builtin.Equality
-open import Agda.Builtin.Unit
-open import Relation.Binary.PropositionalEquality using (refl; cong; subst)
+open import Data.Sum using (inj₁; inj₂; _⊎_)
+open import Level renaming (_⊔_ to lmax; suc to lsuc)
+open import Data.String using (String)
+open import Data.List using (List; _∷_; [])
+open import Data.Unit
+open import Data.Empty
+open import Relation.Binary.PropositionalEquality
 
 -- Model requirements
 
@@ -25,8 +25,6 @@ data Env {l : Level} : (scope : Scope (Set l)) -> Set (lsuc l) where
   env-add : {A : Set l} {scope : Scope (Set l)}
           -> Env scope -> (key : String) -> (a : A)
           -> Env ((key , A) ∷ scope)
-
-data ⊥ : Set where
 
 data InScope {l : Level} {A : Set l} (scope : Scope A) (key : Name) (B : A) : (Set l) where
   scope-found : (S : Scope A) -> scope ≡ ((key , B) ∷ S) -> InScope scope key B
