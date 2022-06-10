@@ -118,7 +118,9 @@ data Term : Scope -> Type -> Set₃ where
   nlit : {s : Scope} -> ℕ -> Term s tNat
   blit : {s : Scope} -> Bool -> Term s tBool
   tif : {s : Scope} {A : Type} -> Term s tBool -> Term s A -> Term s A -> Term s A
-  tplus : {s : Scope} -> Term s tNat -> Term s tNat -> Term s tNat
+  top : {s : Scope} {A B C : Type}
+      -> (El A -> El B -> El C)
+      -> Term s A -> Term s B -> Term s C
   tlam : {s : Scope} {B : Type} -> (n : Name) -> (A : Type) -> Term ((n , El A) ∷ s) B -> Term s (tFun A B)
   tapp : {S : Scope} {A B : Type} -> Term S (tFun A B) -> Term S A -> Term S B
 
@@ -134,10 +136,10 @@ model {S = S} (tif {S} term term₁ term₂) =
   let r2 = model {S = S} term₂ in
     -- See problem 2 in README
     ((fst r2) , (bindf {S2 = S} (local (snd r)) (λ x -> if x then {!!} else snd r2))) -- if x then snd r1 else snd r2)))
-model {S = S} (tplus term₁ term₂) =
+model {S = S} (top op term₁ term₂) =
   let r1 = model term₁ in
   let r2 = model term₂ in
-  S , (bindf (local (snd r1)) λ x -> (bindf (local (snd r2)) λ y -> return (x + y)))
+  S , (bindf (local (snd r1)) λ x -> (bindf (local (snd r2)) λ y -> return (op x y)))
 model {S = S} (tlam n A e) =
   let body = model e in
     S , return (λ x → bindf x (λ v -> bindf (set n v) (λ ⊤ -> (snd body))))
