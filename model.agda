@@ -122,7 +122,7 @@ El tBool = Bool
 -- Really, what do I want here?
 El (tFun x x₁) = M (El x) -> M (El x₁)
 
-data Term : Gamma -> Type -> Set₃ where
+data Term : Gamma -> Type -> Set where
   var : {s : Gamma} {A : Type} -> (n : Name) -> InScope s n A -> Term s A
   nlit : {s : Gamma} -> ℕ -> Term s tNat
   blit : {s : Gamma} -> Bool -> Term s tBool
