@@ -130,7 +130,9 @@ data Term : Gamma -> Type -> Set where
   top : {s : Gamma} {A B C : Type}
       -> (El A -> El B -> El C)
       -> Term s A -> Term s B -> Term s C
-  tlam : {s : Gamma} {B : Type} -> (n : Name) -> (A : Type) -> Term ((n , A) ∷ s) B -> Term s (tFun A B)
+  tlam : {s : Gamma} {B : Type}
+       -> (n : Name) -> (A : Type) -> Term ((n , A) ∷ s) B
+       -> Term s (tFun A B)
   tapp : {S : Gamma} {A B : Type} -> Term S (tFun A B) -> Term S A -> Term S B
 
 modelG : Gamma -> Scope Set
@@ -156,11 +158,14 @@ model {G} (tif {G} term term₁ term₂) =
   let r1 = model {G} term₁ in
   let r2 = model {G} term₂ in
     -- See problem 2 in README
-    ((fst r2) , (bindf {S2 = (modelG G)} (local (snd r)) (λ x -> if x then {!!} else snd r2))) -- if x then snd r1 else snd r2)))
+    ((fst r2) , (bindf {S2 = (modelG G)} (local (snd r))
+                       -- if x then snd r1 else snd r2)))
+                       (λ x -> if x then {!!} else snd r2)))
 model {G} (top op term₁ term₂) =
   let r1 = model term₁ in
   let r2 = model term₂ in
-  (modelG G) , (bindf (local (snd r1)) λ x -> (bindf (local (snd r2)) λ y -> return (op x y)))
+  (modelG G) , (bindf (local (snd r1))
+                      λ x -> (bindf (local (snd r2)) λ y -> return (op x y)))
 model {G} (tlam n A e) =
   let body = model e in
     (modelG G) , return (λ x → bindf x (λ v -> bindf (set n v) (λ ⊤ -> (snd body))))
