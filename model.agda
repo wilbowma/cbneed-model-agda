@@ -1,4 +1,5 @@
 {-# OPTIONS --type-in-type #-}
+-- {-# OPTIONS --cumulativity #-}
 -- See Problem 1 in README
 
 open import Data.Nat
@@ -19,7 +20,7 @@ Name = String
 Scope : ∀ {l} -> (Set l) -> (Set l)
 Scope A = List (Name × A)
 
-data Env {l : Level} : (scope : Scope (Set l)) -> Set l where
+data Env {l : Level} : (scope : Scope (Set l)) -> Set (lsuc l) where
   env-empty : {scope : Scope (Set l)} -> Env []
   env-add : {A : Set l} {scope : Scope (Set l)}
           -> Env scope -> (key : String) -> (a : A)
@@ -42,7 +43,7 @@ test-InScope1 = scope-cons (("meow" , ℕ) ∷ []) "bark" refl absurd test-InSco
   absurd : "bark" ≡ "meow" -> ⊥
   absurd ()
 
-impossibleScope : {l : Level} {key : Name} {A : Set l} -> InScope [] key A -> ⊥
+impossibleScope : {l : Level} {key : Name} {U : Set l} {A : U} -> InScope [] key A -> ⊥
 impossibleScope (scope-found S ())
 impossibleScope (scope-cons S key' () x₁ pf)
 
@@ -69,32 +70,39 @@ record Config {l2 : Level} {l : Level} (A : Set l2) (scope : Scope (Set l)) : (S
     env : Env scope
 
 -- (well-scoped) State Monad
-M : {l1 : Level} {S1 : Scope (Set l1)} {S2 : Scope (Set l1)} {l : Level} -> Set l -> Set (lsuc (lmax l l1))
+M : {l1 : Level} {S1 : Scope (Set l1)} {S2 : Scope (Set l1)} {l : Level}
+  -> Set l -> Set (lsuc (lsuc (lmax l l1)))
 M {S1 = S1} {S2 = S2} A = (env : Env S1) -> Config A S2
 
-return : {l : Level} {S : Scope (Set l)} -> {A : Set l} -> A -> M {S1 = S} {S2 = S} A
+return : {l : Level} {S : Scope (Set l)} -> {A : Set l}
+       -> A -> M {S1 = S} {S2 = S} A
 return {A = A} a e = (state a e)
 
 bindf : ∀ {l1 l2} {A : Set l1} {B : Set l2} {S1 S2 S3 : Scope (Set l1)}
-      -> M {S1 = S1} {S2 = S2} A -> (A -> M {S1 = S2} {S2 = S3} B) -> M {S1 = S1} {S2 = S3} B
+      -> M {S1 = S1} {S2 = S2} A
+      -> (A -> M {S1 = S2} {S2 = S3} B)
+      -> M {S1 = S1} {S2 = S3} B
 bindf {_} {_} {A} {B} a f =
   λ e -> let r = (a e) in ((f (Config.ele r)) (Config.env r))
 
-set : ∀ {l1} {S : Scope (Set l1)} {A : Set} -> (key : String) -> A -> M {S1 = S} {S2 = (key , A) ∷ S} A
-set {S} {A} key x env = state x (env-add env key x)
+set : ∀ {l} {S : Scope (Set l)} {A : Set l}
+    -> (key : String) -> A -> M {S1 = S} {S2 = (key , A) ∷ S} ⊤
+set key x env = state tt (env-add env key x)
 
 local : ∀ {l} {S1 S2 : Scope (Set l)} {A : Set} -> M {S1 = S1} {S2} A -> M {S1 = S1} {S1} A
 local e env = (state (Config.ele (e env)) env)
 
-test-r : ∀ {l} {S : Scope (Set l)} {A : Set} -> {B : Set}
+-- Requires at least --cumulativity?
+test-r : ∀ {l1 l2} {S : Scope (Set l1)} {A : Set l1} -> {B : Set l2}
        -> M {S1 = ("foo" , A) ∷ S} {("foo" , A) ∷ S} B
        -> M {S1 = S} {S} (A -> M {S1 = S} {("foo" , A) ∷ S} B)
-test-r {S} {A} e = return (λ x → bindf (set "foo" x) (λ ⊤ -> e))
+test-r e = return (λ x → bindf (set "foo" x) (λ ⊤ -> e))
 
-get : {l : Level} {S : Scope (Set l)} {A : Set l} -> (key : String) -> {InScope S key A} -> M {S1 = S} A
+get : {l : Level} {S : Scope (Set l)} {A : Set l}
+    -> (key : String) -> {InScope S key A} -> M {S1 = S} A
 get key {scope} env = (state (env-get env key scope) env)
 
-run : ∀ {l} {S2 : Scope (Set l)} {A : Set} -> M {S1 = []} {S2} A -> A
+run : ∀ {l} {S2 : Scope (Set l)} {A : Set l} -> M {S1 = []} {S2} A -> A
 run {A} f = Config.ele (f (env-empty {_} {[]}))
 
 test1 : run (return 5) ≡ 5
@@ -112,6 +120,8 @@ Gamma = Scope Type
 El : Type -> Set
 El tNat = ℕ
 El tBool = Bool
+-- Source of Type : Type problem.
+-- Really, what do I want here?
 El (tFun x x₁) = M (El x) -> M (El x₁)
 
 data Term : Gamma -> Type -> Set₃ where
@@ -134,8 +144,13 @@ model : {G : Gamma} {A : Type}
       -> Σ (Scope Set) (λ S2 -> M {S1 = (modelG G)} {S2} (El A))
 model {G} {A = A} (var n x) = (modelG G) , get n {model-in-scope G x}
   where
-  model-in-scope : Gamma -> InScope G n A -> InScope (modelG G) n (El A)
-  model-in-scope = {!!}
+  model-in-scope : (G : Gamma) -> InScope G n A -> InScope (modelG G) n (El A)
+  model-in-scope [] pf with impossibleScope pf
+  ... | ()
+  model-in-scope ((fst₁ , snd₁) ∷ gamma) (scope-found .gamma refl) =
+    scope-found (modelG gamma) refl
+  model-in-scope ((fst₁ , snd₁) ∷ gamma) (scope-cons .gamma .fst₁ refl x₂ pf) =
+    scope-cons (modelG gamma) fst₁ refl x₂ (model-in-scope gamma pf)
 model {G} (nlit x) = (modelG G) , return x
 model {G} (blit x) = (modelG G) , return x
 model {G} (tif {G} term term₁ term₂) =
