@@ -62,10 +62,6 @@ env-get (env-add env key₁ x) key (scope-cons S .key₁ refl x₂ in-scope) = e
 env-get {S = .[]} env-empty key scope with impossibleScope scope
 ... | ()
 
-data Label : Set where
-  s : Label
-  i : Label
-
 record Config {l2 : Level} {l : Level} (A : Set l2) (scope : Scope {l}) : (Set (lsuc (lsuc (lmax l l2)))) where
   inductive
   constructor state
