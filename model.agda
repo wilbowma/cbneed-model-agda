@@ -1,7 +1,3 @@
--- {-# OPTIONS --type-in-type #-}
-{-# OPTIONS --cumulativity #-}
--- See Problem 1 in README
-
 open import Data.Nat
 open import Data.Product using (_×_; _,_; Σ) renaming (proj₁ to fst) renaming (proj₂ to snd)
 open import Data.Bool
@@ -31,7 +27,7 @@ data Env {l : Level} {U : Set l} {El : U -> Set l} :
           -> Env {El = El} scope -> (key : String) -> (El A)
           -> Env ((key , A) ∷ scope)
 
-module Exmaples where
+module Examples where
   -- A scope mapping names to types
   test-scope : Scope Set
   test-scope = (("meow" , ℕ) ∷ [])
@@ -123,62 +119,82 @@ env-get (env-add env key₁ x) key (scope-cons S .key₁ refl x₂ in-scope) =
 env-get {S = .[]} env-empty key scope with impossibleScope scope
 ... | ()
 
-record Config {l2 : Level} {l : Level} {U : Set l} {El : U -> Set l}
-  (A : Set l2) (scope : Scope U) : (Set (lmax l l2)) where
-  inductive
-  constructor state
-  field
-    ele : A
-    env : Env {El = El} scope
+-- My universe
+data U : Set where
+  tNat : U
+  tBool : U
+  tFun : U -> U -> U
 
--- (well-scoped) State Monad
-M : ∀ {l1 l2} {U : Set l1} {S1 : Scope U} {S2 : Scope U} {El : U -> Set l1}
-  -> Set l2 -> Set (lmax l1 l2)
-M {S1 = S1} {S2 = S2} {El} A = (env : Env {El = El} S1) -> Config {El = El} A S2
+-- This would let me create cycles in the store, so the termination checker
+-- rejects it.
+-- It is not safe to consider (ElC U) consistent as a logic, or terminating,
+-- based on this model construction.
+-- I'd be okay with that, but I also can't seem to get the definition of El to
+-- terminate... maybe something with a later modality?
+mutual
+  ElV : U -> Set
+  --{-# TERMINATING #-}
+  ElV tNat = ℕ
+  ElV tBool = Bool
+  ElV (tFun x x₁) = ElC x -> ElC x₁
 
-return : {l : Level} {U : Set l} {El : U -> Set l} {S : Scope U} -> {A : Set l}
-       -> A -> M {S1 = S} {S2 = S} A
+  ElC : U -> Set
+  ElC x = {!!}
+  -- Definitely doesn't terminate.. hmmm... how can I thunk this?
+  -- See Problem 1
+  --ElC x = M (ElV x)
+
+  Store = Env {U = U} {El = ElC}
+
+  record Config {S : Scope U} (A : Set) : Set where
+    inductive
+    constructor state
+    field
+      ele : A
+      env : Store S
+
+  -- (well-scoped) State Monad
+  M : {S S' : Scope U} -> Set -> Set
+  M {S} {S'} A = (env : Store S) -> Config {S'} A
+
+return : {S : Scope U} {A : Set} -> A -> M A
 return {A = A} a e = (state a e)
 
-bindf : ∀ {l1 l2} {A : Set l1} {B : Set l2} {S1 S2 S3 : Scope (Set l1)}
-      -> M {S1 = S1} {S2 = S2} A
-      -> (A -> M {S1 = S2} {S2 = S3} B)
-      -> M {S1 = S1} {S2 = S3} B
-bindf {_} {_} {A} {B} a f =
+bindf : {A B : Set} {S1 S2 S3 : Scope U}
+      -> M {S1} {S2} A
+      -> (A -> M {S2} {S3} B)
+      -> M {S1} {S3} B
+bindf a f =
   λ e -> let r = (a e) in ((f (Config.ele r)) (Config.env r))
 
-set : ∀ {l} {U : (Set l)} {S : Scope U} {A : U} {El : U -> Set l}
-    -> (key : String) -> El A -> M {S1 = S} {S2 = (key , A) ∷ S} ⊤
+set : {S : Scope U} {A : U}
+    -> (key : String) -> ElC A
+    -> M {S} {(key , A) ∷ S} ⊤
 set key x env = state tt (env-add env key x)
 
-local : ∀ {l} {S1 S2 : Scope (Set l)} {A : Set} -> M {S1 = S1} {S2} A -> M {S1 = S1} {S1} A
+local : {S S' : Scope U} {A : Set} -> M {S} {S} A -> M {S} {S} A
 local e env = (state (Config.ele (e env)) env)
 
--- Requires at least --cumulativity?
--- test-r : ∀ {l1 l2} {S : Scope (Set l1)} {A : Set l1} -> {B : Set l2}
---        -> M {S1 = ("foo" , A) ∷ S} {("foo" , A) ∷ S} B
---        -> M {S1 = S} {S} (A -> M {S1 = S} {("foo" , A) ∷ S} B)
--- test-r e = return (λ x → bindf (set "foo" x) (λ ⊤ -> e))
+get : {S : Scope U}  {A : U}
+    -> (key : String) -> (InScope S key A)
+    -> M {S} (ElV A)
+-- Tie's Landin's Knot
+get key pf env = (env-get env key pf) env
 
-get : {l : Level} {U : (Set l)} {S : Scope U} {El : U -> Set l} {A : U}
-    -> (key : String) -> {InScope S key A} -> M {S1 = S} (El A)
-get key {scope} env = (state (env-get env key scope) env)
-
-run : ∀ {l} {S2 : Scope (Set l)} {A : Set l} -> M {S1 = []} {S2} A -> A
+run : {A : Set} -> M {S = []} A -> A
 run {A} f = Config.ele (f (env-empty))
 
-test1 : run (return {El = λ x -> Set} 5) ≡ 5
+test1 : run (return 5) ≡ 5
 test1 = refl
 
 -- Syntax and model construction
+Type = U
 
-data Type : Set where
-  tNat : Type
-  tBool : Type
-  tFun : Type -> Type -> Type
+-- Scope is really just a list of names
+gScope = Scope ⊤
 
-Gamma : {S : Scope Set} -> Set₁
-Gamma {S = S} = Env {El = λ x -> Type} S
+Gamma : {S : gScope} -> Set
+Gamma {S} = Env {U = ⊤} {El = (λ x -> Type)} S
 
 testG : Gamma
 testG = env-add env-empty "meow" tNat
@@ -186,70 +202,72 @@ testG = env-add env-empty "meow" tNat
 test-get : env-get testG "meow" _ ≡ tNat
 test-get = refl
 
-El : Type -> Set
-El tNat = ℕ
-El tBool = Bool
--- Source of Type : Type problem.
--- Really, what do I want here?
-El (tFun x x₁) = M (El x) -> M (El x₁)
 
-data Term : {S : Scope Set} -> Gamma {S = S} -> Type -> Set₁ where
-  var : {S : Scope Set} {s : Gamma {S = S}} {A : Type}
-      -> (n : Name) -> (pf : InScope S n Type)
-      -> Term s (env-get s n pf)
-  nlit : {s : Gamma} -> ℕ -> Term s tNat
-  blit : {s : Gamma} -> Bool -> Term s tBool
-  tif : {s : Gamma} {A : Type} -> Term s tBool -> Term s A -> Term s A -> Term s A
-  top : {s : Gamma} {A B C : Type}
-      -> (El A -> El B -> El C)
-      -> Term s A -> Term s B -> Term s C
-  tlam : {s : Gamma} {B : Type}
-       -> (n : Name) -> (A : Type) -> Term (env-add s n A) B
-       -> Term s (tFun A B)
-  tapp : {S : Gamma} {A B : Type} -> Term S (tFun A B) -> Term S A -> Term S B
+data Term {S : gScope} (G : Gamma) : Type -> Set where
+  var : {A : Type}
+      -> (n : Name) -> (pf : InScope S n tt)
+      -> Term G (env-get G n pf)
+  nlit : ℕ -> Term G tNat
+  blit : Bool -> Term G tBool
+  tif : {A : Type} -> Term G tBool -> Term G A -> Term G A -> Term G A
+  top : {A B C : Type}
+      -> (ElV A -> ElV B -> ElV C)
+      -> Term G A -> Term G B -> Term G C
+  tlam : {B : Type}
+       -> (n : Name) -> (A : Type) -> Term (env-add G n A) B
+       -> Term G (tFun A B)
+  tapp : {A B : Type} -> Term G (tFun A B) -> Term G A -> Term G B
 
--- modelG : Gamma -> Scope Set
--- modelG [] = []
--- modelG ((fst₁ , snd₁) ∷ x₁) = (fst₁ , (El snd₁)) ∷ (modelG x₁)
+model-env : {S : gScope} -> Gamma {S} -> Scope U
+model-env env-empty = []
+model-env (env-add x key x₁) = (key , x₁) ∷ (model-env x)
 
-model : {S : Scope Set} {G : Gamma {S = S}} {A : Type}
+scope-preservation : {S : gScope} {key : Name}
+                   -> {G : Gamma {S}}
+                   -> (pf : (InScope S key tt))
+                   -> (InScope (model-env G) key (env-get G key pf))
+scope-preservation {G = env-empty} S with (impossibleScope S)
+... | ()
+scope-preservation {G = env-add G key x} (scope-found S refl) =
+  scope-found (model-env G) refl
+scope-preservation {G = env-add G key x} (scope-cons S .key refl x₂ pf) =
+  scope-cons (model-env G) key refl x₂ (scope-preservation pf)
+
+
+-- Leave S' as a unification variable to avoid annoying environment passing of
+-- the new S', and to avoid Problem 2.
+model : {S : gScope} {G : Gamma {S}} {A : Type}
       -> Term G A
-      -> Σ (Scope Set) (λ S2 -> M {S1 = S} {S2} (El A))
-model {S} {G} {A = A} (var n x) = (n , (M (El A))) ∷ S ,
-  bindf (get n {model-in-scope x})
-        λ v -> (bindf (set n (return v)) (λ ⊤ -> (return v)))
-  where
-  model-in-scope : {S : Scope Set} {G : Gamma {S = S}} {n : Name}
-                 -> (pf : InScope S n Type) -> InScope S n (El (env-get G n pf))
-  model-in-scope pf = {!!}
-model {S = S} (nlit x) = S , return x
-model {S = S} (blit x) = S , return x
-model {S = S} (tif {G} term term₁ term₂) =
+      -> M {(model-env G)} (ElV A)
+model (var n pf) =
+  let th = (get n (scope-preservation pf)) in
+    (bindf th (λ e -> bindf (set n (return e)) (λ tt -> (return e))))
+model (nlit x) = return x
+model (blit x) = return x
+model (tif term term₁ term₂) =
   let r = model term in
   let r1 = model term₁ in
   let r2 = model term₂ in
-    -- See problem 2 in README
-    ((fst r2) , (bindf {S2 = S} (local (snd r))
-                       -- if x then snd r1 else snd r2)))
-                       (λ x -> if x then {!!} else snd r2)))
+  (bindf r (λ v -> (if v then r1 else r2)))
+  -- See problem 2 in README
 model {S = S} (top op term₁ term₂) =
   let r1 = model term₁ in
   let r2 = model term₂ in
-  S , (bindf (local (snd r1))
-                      λ x -> (bindf (local (snd r2)) λ y -> return (op x y)))
+  (bindf (local r1)
+    λ x -> (bindf (local r2) λ y -> return (op x y)))
 model {S} (tlam n A e) =
   let body = model e in
-    S , return (λ x → bindf x (λ v -> bindf (set n v) (λ ⊤ -> (snd body))))
+    return (λ x → bindf x (λ v -> bindf (set n v) (λ ⊤ -> body)))
 model (tapp term₁ term₂) =
   let r1 = (model term₁) in
   let r2 = (model term₂) in
-    (fst r1) , bindf (snd r1) (λ f -> (f (snd r2)))
+    bindf r1 (λ f -> (f r2))
 
 -- For closed terms
 model' : {A : Type}
       -> Term env-empty A
-      -> Σ (Scope Set) (λ S2 -> M {S1 = []} {S2} (El A))
+      -> M {[]} (ElV A)
 model' e = model e
 
-test : (run (snd (model' (nlit 5)))) ≡ 5
+test : (run (model' (nlit 5))) ≡ 5
 test = refl
