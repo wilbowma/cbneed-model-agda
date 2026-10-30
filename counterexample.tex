@@ -38,6 +38,17 @@
 % rule labels; \bad highlights the failing side condition
 \newcommand{\rn}[1]{\textsc{#1}}
 \newcommand{\bad}[1]{\colorbox{red!15}{$#1$}}
+\newcommand{\good}[1]{\colorbox{green!15}{$#1$}}
+% logical relation over worlds
+\newcommand{\Vrel}[2]{\mathcal{V}\llbracket #1 \rrbracket(#2)}
+\newcommand{\Erel}[2]{\mathcal{E}\llbracket #1 \rrbracket(#2)}
+\newcommand{\Grel}[2]{\mathcal{G}\llbracket #1 \rrbracket(#2)}
+\newcommand{\last}[1]{\mathit{last}(#1)}
+\newcommand{\ext}{\sqsupseteq}
+\newcommand{\cfg}[2]{\langle #1 \mid #2 \rangle}
+\newcommand{\evals}[5]{\cfg{#1}{#2} \Downarrow \cfg{#3}{#4} \mathrel{\triangleright} #5}
+\newcommand{\fresh}{\mathit{fresh}}
+\newcommand{\Val}{\mathit{Val}}
 % Typeset a derivation on a wide canvas so mathpartir never wraps premises,
 % then shrink it to the line width if needed.
 \newcommand{\tree}[1]{%
@@ -346,7 +357,7 @@ kinding rule, that is, from the $\mathsf{Ref}$ inside a promise:
     is a promise.
 \end{itemize}
 Under the call-by-value translation (the identity) there are no promises, and
-$P$ types with every level at $0$.
+$P$ types with every level at $0$ (\S\ref{sec:cbv}).
 
 \paragraph{A less naive translation.}
 Suppose a translation passes value arguments directly, and take the case most
@@ -358,5 +369,527 @@ the closure $\lam{n}{N} \cdots$ still captures it, so $c \geq a + 1$. Then
   c \;\geq\; a + 1 \;\geq\; d + 1 \;\geq\; c + 1.
 \]
 The gap shrinks from $2$ to $1$, but it never closes.
+
+\newpage
+\section{The call-by-value version}
+\label{sec:cbv}
+
+Read as a call-by-value $\lambda_{\mathrm{PR}}$ term, $P$ has no references.
+It is
+\[
+  \lam{g}{\tau_g'} g\,(\lam{n}{\Nat} g\,(\lam{m}{\Nat} m))
+\]
+with the types $F'$ and $\tau_g'$ below. The cycle of constraints is the same
+as before, but every edge is non-strict.
+
+\paragraph{Kinding.}
+
+\tree{
+  \inferrule*[right={\rn{Arr}\enspace$d \geq c$}]
+  {
+    \inferrule*[right={\rn{Arr}\enspace$c \geq 0$}]
+      {\Nat :: \Type{0} \\ \Nat :: \Type{0}}
+      {F' = \Nat \arr{c} \Nat \;::\; \Type{c}}
+    \\
+    \Nat :: \Type{0}
+  }
+  {\tau_g' = F' \arr{d} \Nat \;::\; \Type{d}}
+}
+
+\paragraph{Typing.}
+The highlighted side condition is the one that failed before: the closure
+$\lam{n}{\Nat} \cdots$ captures $g$. Now $g$ is a function, not a cell, so the
+free-variable rule asks only that $c \geq d$.
+
+\tree{
+    \inferrule*[right={$\lambda$\enspace$e \geq d$}]
+    {
+      \inferrule*
+      {
+        \inferrule*{ }{g{:}\tau_g' \vdash g : \tau_g'}
+        \\
+        \inferrule*[right={$\lambda$\enspace$\good{c \geq d}$}]
+        {
+          \inferrule*
+          {
+            \inferrule*{ }{g{:}\tau_g', n{:}\Nat \vdash g : \tau_g'}
+            \\
+            \inferrule*[right={$\lambda$\enspace$c \geq 0$}]
+            {
+              \inferrule*{ }
+                {g{:}\tau_g', n{:}\Nat, m{:}\Nat \vdash m : \Nat}
+            }
+            {g{:}\tau_g', n{:}\Nat \vdash \lam{m}{\Nat} m : F'}
+          }
+          {g{:}\tau_g', n{:}\Nat \vdash g\,(\lam{m}{\Nat} m) : \Nat}
+        }
+        {g{:}\tau_g' \vdash \lam{n}{\Nat} g\,(\lam{m}{\Nat} m) : F'}
+      }
+      {g{:}\tau_g' \vdash g\,(\lam{n}{\Nat} g\,(\lam{m}{\Nat} m)) : \Nat}
+    }
+    {\vdash \lam{g}{\tau_g'} g\,(\lam{n}{\Nat} g\,(\lam{m}{\Nat} m)) : \tau_g' \arr{e} \Nat}
+}
+
+Kinding gives $d \geq c$ and typing gives $c \geq d$, so $c = d$. Taking
+$c = d = e = 0$ satisfies every side condition. Compare the chain of
+\S\ref{sec:why}:
+\[
+  c \;\geq\; d \;\geq\; c
+  \qquad\text{versus}\qquad
+  c \;\geq\; a + 1 \;\geq\; d + 1 \;\geq\; b + 2 \;\geq\; c + 2.
+\]
+
+\newpage
+\paragraph{The heap.}
+Run the same program:
+\[
+  (\lam{g}{\tau_g'} g\,
+    \underbrace{\colorbox{green!15}{$\displaystyle
+      \lam{n}{\Nat} g\,\underbrace{(\lam{m}{\Nat} m)}_{f_2}$}}_{f_1})\;
+  \underbrace{(\lam{f}{F'} f\,0)}_{g}
+\]
+$\lambda_{\mathrm{PR}}$ has no cells here: variables are bound to values. The
+figure shows the closures that an implementation allocates on the heap,
+named as before, and placed in the universe of their type. Numbers are passed
+directly, so $n$ and $m$ get no heap object.
+
+\begin{center}
+\begin{tikzpicture}[
+    x=4.6cm, y=2.6cm,
+    cell/.style={draw, rounded corners=2pt, fill=white, align=center,
+                 inner sep=4pt, minimum width=2.9cm, font=\small},
+    band/.style={fill=black!6, draw=none},
+    stored/.style={-{Stealth[length=2.5mm]}, thick},
+    arg/.style={-{Stealth[length=2.5mm]}, dashed, black!60},
+    ok/.style={stored, green!45!black, line width=1.2pt},
+    lbl/.style={font=\footnotesize, fill=white, inner sep=1.5pt},
+  ]
+
+  % one universe band: c = d
+  \fill[band] (0.35, -0.38) rectangle (3.65, 0.38);
+  \node[anchor=east, font=\small] at (0.3, 0) {$\Type{c} = \Type{d}$};
+  \draw[-{Stealth}, black!50] (0.6, -0.6) -- (3.6, -0.6)
+    node[midway, below, font=\small] {allocation order};
+
+  \node[cell] (g)  at (1, 0) {$g$ \\[2pt] $\lam{f}{F'} f\,0$};
+  \node[cell, fill=green!8] (c) at (2, 0)
+    {$f_1$ \\[2pt] $\lam{n}{\Nat} g\,(\lam{m}{\Nat} m)$};
+  \node[cell] (id) at (3, 0) {$f_2$ \\[2pt] $\lam{m}{\Nat} m$};
+
+  % the captured variable: same universe, which immutable closures allow
+  \draw[ok] (c.south west) to[bend left=35] (g.south east);
+  \node[lbl, text=green!45!black, anchor=north] at ($(c.south west)!0.5!(g.south east) + (0, -0.2)$)
+    {$f_1$ captures $g$};
+
+  % applications at run time
+  \draw[arg] (g.north) .. controls +(0, 0.55) and +(0, 0.55) .. (c.north);
+  \draw[arg] (g.north east) .. controls +(0.5, 0.75) and +(0, 0.75) .. (id.north);
+
+  % legend
+  \begin{scope}[shift={(0.6, -1.0)}]
+    \draw[arg] (0, 0) -- (0.3, 0);
+    \node[anchor=west, font=\footnotesize] at (0.33, 0)
+      {the function is applied to the other};
+    \draw[ok] (1.9, 0) -- (2.2, 0);
+    \node[anchor=west, font=\footnotesize] at (2.23, 0)
+      {captures a closure in the same universe};
+  \end{scope}
+\end{tikzpicture}
+\end{center}
+
+\begin{itemize}
+  \item $g$'s function is applied to $f_1$ and then to $f_2$, both in its own
+    universe. A function at level $d$ may take an argument at level $c \leq d$.
+  \item $f_1$ captures $g$, also in its own universe. A closure at level $c$ may
+    capture a value at level $d \leq c$.
+\end{itemize}
+Both arrows stay inside one universe, so the two orders no longer disagree.
+That is allowed because closures are immutable: stratification constrains
+only what a reference may hold. In the call-by-need version $f_1$ and $g$ are
+cells, so each of these two arrows costs a universe, and they cannot both be
+satisfied.
+
+\newpage
+\section{A logical relation for promises}
+\label{sec:lr}
+
+Both $+1$s in \S\ref{sec:why} come from encoding a promise as a
+$\mathsf{Ref}$. But a promise is written only once, and only with the value
+of its own thunk. This section makes promises primitive, gives them no level
+at all, and proves termination with a Kripke logical relation whose worlds
+contain no types. The image of $P$ is typeable, so it terminates.
+Everything in this section is mechanized in \texttt{Promises.agda}, using
+environments instead of substitution.
+
+\subsection{The language}
+
+The target language has natural numbers, functions and primitive promises,
+and no references. Since nothing in it costs a level, there are no level
+annotations.
+\[
+\begin{array}{@{}l@{\quad}r@{\;\;::=\;\;}l@{}}
+  \text{Types} & \tau & \Nat \mid \tau \to \tau \mid \Prom{}{\tau} \\
+  \text{Values} & v & n \mid \lam{x}{\tau} e \mid \ell \\
+  \text{Expressions} & e & v \mid x \mid e\,e \mid \prom{e} \mid \frc{e} \\
+  \text{Stores} & S & \cdot \mid S[\ell \mapsto e]
+\end{array}
+\]
+A store maps each location to a closed expression: an unforced thunk, or a
+memoized value. The translation of \S2 is unchanged, except that
+$\Prom{}{\tau}$, $\prom{e}$ and $\frc{e}$ are now primitive. Typing is
+standard, with
+\begin{mathpar}
+  \inferrule*[right={$\lceil\cdot\rceil$}]
+    {\Gamma \vdash e : \tau}
+    {\Gamma \vdash \prom{e} : \Prom{}{\tau}}
+  \and
+  \inferrule*[right={$\lfloor\cdot\rfloor$}]
+    {\Gamma \vdash e : \Prom{}{\tau}}
+    {\Gamma \vdash \frc{e} : \tau}
+\end{mathpar}
+With $N = \Prom{}{\Nat}$, $F = N \to \Nat$, $R = \Prom{}{F}$,
+$\tau_g = R \to \Nat$ and $T = \Prom{}{\tau_g}$, the derivation of \S4 goes
+through with every side condition gone:
+$\vdash \tr{P} : T \to \Nat$.
+
+\paragraph{Evaluation.}
+Evaluation is big-step and records its trace $\pi$, the list of stores
+after each change to the store. Forcing has two rules: a memo hit returns the
+stored value without writing, and a memo miss runs the thunk and then writes
+its value back.
+\begin{mathpar}
+  \inferrule{ }{\evals{S}{v}{S}{v}{\varepsilon}}
+  \and
+  \inferrule
+    {\evals{S}{e_1}{S_1}{\lam{x}{\tau} e}{\pi_1} \\
+     \evals{S_1}{e_2}{S_2}{v_2}{\pi_2} \\
+     \evals{S_2}{e[v_2/x]}{S_3}{v}{\pi_3}}
+    {\evals{S}{e_1\,e_2}{S_3}{v}{\pi_1\,\pi_2\,\pi_3}}
+  \and
+  \inferrule
+    {\ell = \fresh(S)}
+    {\evals{S}{\prom{e}}{S[\ell \mapsto e]}{\ell}{S[\ell \mapsto e]}}
+  \\
+  \inferrule*[right=Hit]
+    {\evals{S}{e}{S_1}{\ell}{\pi_1} \\ S_1(\ell) = v}
+    {\evals{S}{\frc{e}}{S_1}{v}{\pi_1}}
+  \and
+  \inferrule*[right=Miss]
+    {\evals{S}{e}{S_1}{\ell}{\pi_1} \\ S_1(\ell) = t \notin \Val \\
+     \evals{S_1}{t}{S_2}{v}{\pi_2}}
+    {\evals{S}{\frc{e}}{S_2[\ell \mapsto v]}{v}{\pi_1\,\pi_2\,S_2[\ell \mapsto v]}}
+\end{mathpar}
+$\fresh$ is a function, such as the least location not in $\mathrm{dom}(S)$,
+so evaluation is deterministic.
+
+\subsection{Worlds}
+
+The type-world circularity arises because worlds map locations to types, and
+the meaning of a type depends on worlds. Here a world is instead the history
+of a computation: the sequence of stores it has passed through. A world
+contains no types, so there is nothing circular to define.
+
+\paragraph{Definition.}
+A world $W = S_0 \cdots S_n$ is a non-empty sequence of stores in which
+each store arises from the previous one by one of two steps:
+\begin{itemize}
+  \item \emph{allocation}: $S_{i+1} = S_i[\ell \mapsto e]$, with
+    $\ell \notin \mathrm{dom}(S_i)$ and $e$ any closed expression;
+  \item \emph{memoization}: $S_{i+1} = S_i[\ell \mapsto v]$, where for some
+    $j \leq i$, $S_j(\ell) = t \notin \Val$ and
+    $\evals{S_j}{t}{S_i}{v}{S_{j+1} \cdots S_i}$.
+\end{itemize}
+A memoization is justified by a run of the cell's own thunk, recorded
+earlier in the same world. That is the only way a cell's contents ever
+change. $W' \ext W$ when $W$ is a prefix of $W'$, and $\last{W}$ is the final
+store of $W$: the present. Domains only grow along a world, and a cell's contents change
+only from a thunk to a value.
+
+\begin{lemma}[Runs extend worlds]
+  If $\evals{\last{W}}{e}{S}{v}{\pi}$, then $W \cdot \pi$ is a world.
+\end{lemma}
+\begin{proof}
+  By induction on the derivation. In \rn{Miss}, the final write is a
+  memoization justified by the position of $S_1$ in $W \cdot \pi_1$, and by
+  the run of $t$, whose trace is exactly $\pi_2$.
+\end{proof}
+
+\subsection{The relation}
+
+\[
+\begin{array}{@{}l@{\;\;=\;\;}l@{}}
+  \Vrel{\Nat}{W} & \mathbb{N} \\
+  \Vrel{A \to B}{W} &
+    \{\, \lam{x}{A} e \mid \forall W' \ext W.\ \forall v \in \Vrel{A}{W'}.\
+      e[v/x] \in \Erel{B}{W'} \,\} \\
+  \Vrel{\Prom{}{\tau}}{W} &
+    \{\, \ell \in \mathrm{dom}(\last{W}) \mid \forall W' \ext W.\
+      \last{W'}(\ell) \in \Erel{\tau}{W'} \,\} \\[1ex]
+  \Erel{\tau}{W} &
+    \{\, e \mid \forall W' \ext W.\
+      \evals{\last{W'}}{e}{S}{v}{\pi} \wedge v \in \Vrel{\tau}{W' \cdot \pi} \,\} \\
+  \Grel{\Gamma}{W} &
+    \{\, \gamma \mid \forall x{:}A \in \Gamma.\ \gamma(x) \in \Vrel{A}{W} \,\}
+\end{array}
+\]
+The definition is by induction on the type: $\Vrel{\Prom{}{\tau}}{W}$ only
+mentions $\Erel{\tau}{\cdot}$, and worlds are syntactic. A promise is good
+when its cell's contents, thunk or memoized value, are a good computation in
+every future. No other cell's type is ever consulted.
+
+\begin{lemma}[Monotonicity]
+  If $W' \ext W$, then $\Vrel{\tau}{W} \subseteq \Vrel{\tau}{W'}$ and
+  $\Erel{\tau}{W} \subseteq \Erel{\tau}{W'}$.
+\end{lemma}
+\begin{proof}
+  Every clause quantifies over all extensions, and $\ext$ is transitive.
+  Domains only grow, so $\ell \in \mathrm{dom}(\last{W'})$.
+\end{proof}
+
+\begin{lemma}[Values]
+  $\Vrel{\tau}{W} \subseteq \Erel{\tau}{W}$.
+\end{lemma}
+\begin{proof}
+  A value evaluates to itself with an empty trace. Apply monotonicity.
+\end{proof}
+
+\begin{lemma}[History of a cell]
+  Let $\ell \notin \mathrm{dom}(\last{W})$, let $W_1 = W \cdot
+  \last{W}[\ell \mapsto t]$ with $t \notin \Val$, and let $W^* \ext W_1$. Then
+  either $\last{W^*}(\ell) = t$, or $\last{W^*}(\ell) = v$ and $W^*$ has a
+  prefix $W_j \cdot \pi \cdot S[\ell \mapsto v]$, where $W_j \ext W_1$,
+  $\evals{\last{W_j}}{t}{S}{v}{\pi}$, and $\ell$ is not written afterwards.
+\end{lemma}
+\begin{proof}
+  Take the last memoization of $\ell$ in $W^*$. Its justification is a store
+  $S_j$ with $S_j(\ell) \notin \Val$. $S_j$ contains $\ell$, so it comes no
+  earlier than $\last{W_1}$, because $\ell$ was fresh. A cell's contents only
+  change from a thunk to a value, so $S_j(\ell) = t$.
+\end{proof}
+
+\subsection{The fundamental lemma}
+
+\begin{lemma}[Fundamental]
+  If $\Gamma \vdash e : \tau$ and $\gamma \in \Grel{\Gamma}{W}$, then
+  $\gamma(e) \in \Erel{\tau}{W}$.
+\end{lemma}
+\begin{proof}
+  By induction on the typing derivation. Variables, numbers, $\lambda$ and
+  application are standard, using monotonicity and the values lemma. We show
+  the two promise cases.
+
+  \emph{Promise.} Let $W' \ext W$, $S' = \last{W'}$ and $t = \gamma(e)$. Then
+  $\evals{S'}{\prom{t}}{S_1}{\ell}{S_1}$ with $S_1 = S'[\ell \mapsto t]$ and
+  $\ell = \fresh(S')$. Let $W_1 = W' \cdot S_1$. We must show
+  $\ell \in \Vrel{\Prom{}{\tau}}{W_1}$, so let $W^* \ext W_1$. By the history
+  lemma, there are two cases.
+  \begin{itemize}
+    \item $\last{W^*}(\ell) = t$. By the induction hypothesis,
+      $t \in \Erel{\tau}{W}$, and $W^* \ext W$.
+    \item $\last{W^*}(\ell) = v$, from a run
+      $\evals{\last{W_j}}{t}{S}{v}{\pi}$ with $W_j \ext W_1 \ext W$. By the
+      induction hypothesis, $t \in \Erel{\tau}{W_j}$, and by determinism this
+      is the run that relation describes. So
+      $v \in \Vrel{\tau}{W_j \cdot \pi}$. Since $W^* \ext W_j \cdot \pi$,
+      monotonicity gives $v \in \Vrel{\tau}{W^*}$, and the values lemma gives
+      $v \in \Erel{\tau}{W^*}$.
+  \end{itemize}
+
+  \emph{Force.} Let $W' \ext W$. By the induction hypothesis,
+  $\evals{\last{W'}}{\gamma(e)}{S_1}{\ell}{\pi_1}$ with
+  $\ell \in \Vrel{\Prom{}{\tau}}{W_1}$, where $W_1 = W' \cdot \pi_1$. Taking
+  the trivial extension, $S_1(\ell) \in \Erel{\tau}{W_1}$.
+  \begin{itemize}
+    \item \rn{Hit}: $S_1(\ell) = v$ evaluates to itself, so
+      $v \in \Vrel{\tau}{W_1}$.
+    \item \rn{Miss}: $S_1(\ell) = t$, and
+      $\evals{S_1}{t}{S_2}{v}{\pi_2}$ with $v \in \Vrel{\tau}{W_1 \cdot \pi_2}$.
+      The final world $W_1 \cdot \pi_2 \cdot S_2[\ell \mapsto v]$ extends
+      $W_1 \cdot \pi_2$, so monotonicity finishes the case. \qedhere
+  \end{itemize}
+\end{proof}
+
+\paragraph{Corollary.}
+Every closed, well-typed expression terminates. In particular,
+$\tr{P}$ and $\tr{P}\,\prom{(\slam{h} h)\,(\slam{f} f\,0)}$ do.
+
+\subsection{Remarks}
+
+\begin{itemize}
+  \item \emph{Acyclicity is a consequence, not an assumption.} Nothing above
+    says that a thunk cannot reach its own cell. If it did, forcing it would
+    re-enter the cell forever, and the thunk would not be in
+    $\Erel{\tau}{\cdot}$. The fundamental lemma shows that no well-typed
+    thunk does this.
+  \item \emph{Why this fails for references.} The proof works because a
+    memoization is justified by evaluation: the world records the run
+    that produced the value, and the cell's own invariant says that run ends
+    in a good value. An arbitrary write $\ell \assign v$ has no such
+    justification. To keep the cell's invariant, worlds would have to
+    allow only writes of values in $\Vrel{\tau}{\cdot}$ at the cell's type
+    $\tau$. Worlds would then mention the relation at arbitrary types, and
+    the circularity returns. $\lambda_{\mathrm{PR}}$ breaks it with levels.
+  \item \emph{Adding references back.} Combining this relation with
+    $\lambda_{\mathrm{PR}}$'s levelled worlds is open. A thunk may read a
+    reference, so the run that justifies a memoization must start from a heap
+    that satisfies the reference world. Stating that inside the definition of
+    worlds mentions heap satisfaction, which mentions the relation at
+    every level.
+\end{itemize}
+
+\section{Worlds compared}
+\label{sec:worlds}
+
+The type-world circularity has the same source in every model of
+higher-order state: a world must say what each cell may hold, and if that
+description is semantic, it depends on worlds. This section compares how
+four models avoid it. They are $\lambda_{\mathrm{PR}}$; the core and extended
+$L^3$ of Ahmed, Fluet and Morrisett (\emph{$L^3$: A Linear Language with
+Locations}, 2007); the full ground references of Kammar, Levy, Moss and
+Staton (\emph{A Monad for Full Ground Reference Cells}, LICS 2017); and the
+worlds of \S\ref{sec:lr}.
+
+\paragraph{What a world records.}
+\begin{itemize}
+  \item $\lambda_{\mathrm{PR}}$: a map from locations to a level and a
+    \emph{semantic} type, $\mathit{World}_{k+1} = \mathit{Loc}
+    \rightharpoonup (i : \mathit{Fin}(k+1)) \times \mathit{Type}_i$. The
+    circularity is cut by levels: a world at level $k$ only mentions types
+    below $k$.
+  \item Core $L^3$: no world at all. A type means a set of pairs $(\sigma, v)$
+    of a value and its \emph{exclusive store}, the concrete part of the
+    store it owns. $\mathsf{Cap}\,\ell\,\tau$ means
+    $\{(\sigma + \{\ell \mapsto v\}, \mathsf{cap}) \mid (\sigma, v) \in
+    \mathcal{V}\llbracket\tau\rrbracket\}$, so the definition is by
+    induction on types.
+  \item Extended $L^3$, which adds ML-style references: a store typing
+    $\Psi$ from frozen locations to semantic types. That brings the
+    circularity back, and $L^3$ cuts it with step-indexing, consulting
+    $\Psi$ only at a smaller approximation, $\lfloor\Psi\rfloor_j$ with
+    $j < k$. Step indices play the role that levels play in
+    $\lambda_{\mathrm{PR}}$.
+  \item Full ground references: a \emph{heap layout}
+    $w : \mathit{Loc} \rightharpoonup_{\mathit{fin}} \mathit{Sort}$, mapping
+    each location to the \emph{syntactic} name of a full ground type. Types
+    denote functors from worlds to sets, with
+    $\llbracket \mathsf{ref}\,c \rrbracket w = \{\ell \mid w(\ell) = c\}$.
+  \item \S\ref{sec:lr}: the whole history of concrete stores, with no types.
+\end{itemize}
+
+Full ground references and \S\ref{sec:lr} both avoid the circularity by
+making worlds syntactic, but they restrict different things. Full ground
+references restrict \emph{what} a cell may hold: data and references, never
+functions or thunks. A cell's meaning at a world then depends only on that
+world. In the paper's words, when initialising a cell, ``all the information
+we need in order to determine its value is in the target world''. Promises
+restrict \emph{how} a cell may change: once, by its own thunk. Contents may be
+higher-order. Their meaning is not recorded in the world, but carried by the
+pointer's type, as in core $L^3$.
+
+\paragraph{Allocation.}
+\begin{itemize}
+  \item $\lambda_{\mathrm{PR}}$: extend the world with the new location and
+    the semantic type of its contents, at a lower level.
+  \item Core $L^3$: the new cell joins the exclusive store of the value that
+    owns it. The rest of the store is untouched.
+  \item Full ground references: heaps
+    $H w = \prod_{(\ell : c) \in w} \llbracket \mathit{ctype}\,c \rrbracket w$
+    are not functorial in layout extension. A heap at $w$ cannot be turned
+    into a heap at a larger $w'$ without values for the new cells. So a world
+    morphism is not just an injection. In the category of
+    \emph{initialisations}, a morphism $w_1 \to w_2$ is an injection together
+    with a heaplet giving the initial contents of the new cells, which may
+    refer to each other cyclically. Heaps are functorial over
+    initialisations, as the representable $H \cong E(\emptyset, -)$.
+  \item \S\ref{sec:lr}: an allocation step appends a store with the new cell
+    and its thunk.
+\end{itemize}
+
+Our worlds carry their initialisation data, as Kammar et al.'s morphisms do,
+but in the objects rather than the morphisms. A history records every store,
+so the contents of new cells are already in the larger world, and extension
+can be a preorder (the prefix order) instead of a category. The definition
+of worlds also allows a cyclic initialisation, a thunk that mentions its own
+cell. Evaluation never creates one, because a thunk is built before its cell
+exists, and the fundamental lemma never needs to certify one.
+
+\paragraph{Updates.}
+\begin{itemize}
+  \item $\lambda_{\mathrm{PR}}$: any write of a value of the cell's semantic
+    type. The world is unchanged, and the heap must still satisfy it,
+    $\mathbf{W} \vdash h$.
+  \item Core $L^3$: a strong update by the owner of the capability. Ownership
+    is linear, so nothing else can observe the change, and the frame
+    condition of $\mathcal{C}\llbracket\tau\rrbracket$ says the rest of the
+    store is unmodified.
+  \item Full ground references: any well-sorted write. The layout is
+    unchanged. Because contents are first-order, every sort-respecting
+    assignment is a heap, so there is no satisfaction relation to maintain.
+  \item \S\ref{sec:lr}: memoization only, recorded as a step of the world,
+    justified by a run of the cell's own thunk recorded earlier in the same
+    world.
+\end{itemize}
+
+\paragraph{The future.}
+$\lambda_{\mathrm{PR}}$, full ground references and \S\ref{sec:lr} quantify
+functions over future worlds. These are extensions of the layout for
+$\lambda_{\mathrm{PR}}$ and full ground references (ends over
+$w \downarrow u$ in the functor category), and extensions of the history
+here. Core $L^3$ replaces future worlds with the frame: a computation must
+work for every disjoint rest of the store, and leave it unchanged. Promises
+cannot use a frame, because cells are shared. The continuation's cells may be
+memoized by the computation. Monotonicity of the relation over histories
+plays the frame's role: whatever the computation memoizes, every promise that
+was good before stays good.
+
+\paragraph{Heaps and worlds.}
+In $\lambda_{\mathrm{PR}}$ and full ground references, the heap is separate
+from the world and must be related to it: by satisfaction in
+$\lambda_{\mathrm{PR}}$, and by typing $H w$ in full ground references. In
+core $L^3$ the store fragment is part of the meaning of each value. Here
+there is no separate heap: the present heap is $\last{W}$, and the world is
+that heap together with its past.
+
+\begin{center}
+\small
+\begin{tabular}{@{}p{2.6cm}p{4.1cm}p{4.1cm}p{4.1cm}p{4.1cm}@{}}
+  & $\lambda_{\mathrm{PR}}$ & $L^3$ (core / extended)
+  & full ground references & promises (\S\ref{sec:lr}) \\ \hline
+  world & locations $\mapsto$ level and semantic type
+    & none / store typing of semantic types
+    & layout: locations $\mapsto$ syntactic sort
+    & history of concrete stores \\
+  cut circularity by & universe levels
+    & induction on types / step-indexing
+    & first-order contents & syntactic worlds, self-justified writes \\
+  what cells hold & anything, at a lower level
+    & anything & full ground data & any thunk or value \\
+  allocation & extend world
+    & extend exclusive store & initialisation (injection and heaplet)
+    & append a store \\
+  writes & any value of the type
+    & strong update by owner / any value of the type
+    & any well-sorted value & memoization, justified by a recorded run \\
+  aliasing & yes & no (caps linear) / yes & yes & yes \\
+  cycles in the heap & no knot, by levels & pointers only / yes & yes (cyclic data)
+    & never created
+\end{tabular}
+\end{center}
+
+\section{Related work}
+
+\paragraph{$L^3$ and full ground references.}
+\S\ref{sec:worlds} compares their worlds with ours in detail. Core $L^3$
+shares our idea that a cell's invariant is carried by the type of the pointer
+to it. Full ground references share our syntactic worlds and our treatment
+of allocation data as part of world extension.
+
+\paragraph{$\lambda_{\mathrm{PR}}$.}
+Koronkevich and Bowman (\emph{Type Universes as Kripke Worlds}, ICFP 2025)
+break the type-world circularity for general references by stratifying
+worlds with universe levels. \S\ref{sec:why} shows that encoding promises as
+references in $\lambda_{\mathrm{PR}}$ rules out $P$. \S\ref{sec:lr} shows
+that promises need no levels, because their only write is justified by
+evaluation rather than by a type.
 
 \end{document}
