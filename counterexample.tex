@@ -1,0 +1,401 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.5in,landscape]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{stmaryrd}
+\usepackage{mathpartir}
+\usepackage{xcolor}
+\usepackage{adjustbox}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,fit,backgrounds}
+
+\newtheorem*{lemma}{Lemma}
+
+% lambda-PR (Koronkevich & Bowman, ICFP 2025)
+\newcommand{\Nat}{\mathsf{Nat}}
+\newcommand{\Unit}{\mathsf{Unit}}
+\newcommand{\tRef}{\mathsf{Ref}\,}
+\newcommand{\Type}[1]{\mathsf{Type}_{#1}}
+\newcommand{\arr}[1]{\xrightarrow{#1}}
+\newcommand{\new}{\mathsf{new}\,}
+\newcommand{\deref}{!\,}
+\newcommand{\assign}{\mathrel{:=}}
+\newcommand{\unit}{\langle\rangle}
+\newcommand{\lam}[2]{\lambda #1{:}#2.\,}
+\newcommand{\maxlevel}{\operatorname{max-level}}
+\newcommand{\FV}{\mathit{FV}}
+\newcommand{\klet}{\mathsf{let}\ }
+\newcommand{\kin}{\ \mathsf{in}\ }
+% promises: type, introduction, forcing
+\newcommand{\Prom}[2]{\lceil #2 \rceil^{#1}}
+\newcommand{\prom}[1]{\lceil #1 \rceil}
+\newcommand{\frc}[1]{\lfloor #1 \rfloor}
+% source STLC
+\newcommand{\snat}{\mathsf{nat}}
+\newcommand{\slam}[1]{\lambda #1.\,}
+% translation
+\newcommand{\tr}[1]{\llbracket #1 \rrbracket}
+\newcommand{\trc}[1]{\llbracket #1 \rrbracket^{\mathsf{c}}}
+% rule labels; \bad highlights the failing side condition
+\newcommand{\rn}[1]{\textsc{#1}}
+\newcommand{\bad}[1]{\colorbox{red!15}{$#1$}}
+% Typeset a derivation on a wide canvas so mathpartir never wraps premises,
+% then shrink it to the line width if needed.
+\newcommand{\tree}[1]{%
+  \begin{center}
+  \adjustbox{max width=\linewidth}{\hsize=60cm \linewidth=60cm $#1$}
+  \end{center}}
+
+\title{A call-by-need STLC program with no stratified model}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{The counterexample}
+
+In call-by-need STLC, with $g : (\snat \to \snat) \to \snat$:
+\[
+  P \;\triangleq\; (\slam{g} g\,(\slam{n} g\,(\slam{m} m)))\; G
+  \qquad\text{where}\qquad
+  G \;\triangleq\; (\slam{h} h)\,(\slam{f} f\,0)
+\]
+$G$ is not a value, so $g$'s cell starts as a thunk. It is forced once and
+memoized, and both calls to $g$ share that cell.
+
+\section{Translation to $\lambda_{\mathrm{PR}}$}
+
+\paragraph{Promises.}
+A promise $\prom{e}$ is a memoizing thunk: a reference holding a suspended
+computation. Forcing it, $\frc{x}$, runs the computation and overwrites the
+reference with its value. $\mathsf{let}$ and sequencing stand for the usual
+$\beta$-redexes. Forcing is only ever applied to variables.
+
+\medskip
+\noindent\quad
+$\begin{array}{@{}l@{\;\;\triangleq\;\;}l@{}}
+  \Prom{k}{\tau} & \tRef (\Unit \arr{k} \tau) \\
+  \prom{e} & \new (\lam{\_}{\Unit} e) \\
+  \frc{x} & \klet v = (\deref x)\,\unit \kin x \assign (\lam{\_}{\Unit} v);\ v
+\end{array}$
+\medskip
+
+\begin{lemma}[Promises]
+  The following rules are admissible:
+  \begin{mathpar}
+    \inferrule*[right=\rn{Promise}]
+      {\tau :: \Type{i} \\ k \geq i}
+      {\Prom{k}{\tau} :: \Type{k+1}}
+    \and
+    \inferrule*[right=\rn{Promise}]
+      {\Gamma \vdash e : \tau \\ k \geq \maxlevel(\FV(e), \tau)}
+      {\Gamma \vdash \prom{e} : \Prom{k}{\tau}}
+    \and
+    \inferrule*[right=\rn{Force}]
+      {x : \Prom{k}{\tau} \in \Gamma}
+      {\Gamma \vdash \frc{x} : \tau}
+  \end{mathpar}
+\end{lemma}
+\begin{proof}[Sketch]
+  Kinding is \rn{Arr} (with $\Unit :: \Type{0}$) followed by \rn{Ref}. Typing a
+  promise is \rn{Lam} followed by \rn{New}, where the $\lambda$'s side
+  condition is
+  \[
+    k \;\geq\; \maxlevel(\FV(e), \Unit, \tau) \;=\; \maxlevel(\FV(e), \tau).
+  \]
+  For forcing, the write-back $\lam{\_}{\Unit} v : \Unit \arr{k} \tau$ needs
+  $k \geq \maxlevel(\{v\}, \Unit, \tau) = \maxlevel(\tau)$, which kinding
+  already guarantees. The levels on the $\beta$-redexes that encode
+  $\mathsf{let}$ and sequencing are unconstrained, because those functions are
+  applied immediately and never stored.
+\end{proof}
+
+\paragraph{The translation.}
+Every variable and every argument is a promise. The level annotations $j, k$
+are chosen by the translation: a source program is accepted when some choice
+of levels makes its image typeable.
+
+\medskip
+\noindent\quad
+$\begin{array}{@{}l@{\;\;=\;\;}l@{}}
+  \tr{\snat} & \Nat \\
+  \tr{A \to B} & \trc{A} \arr{k} \tr{B} \\
+  \trc{A} & \Prom{j}{\tr{A}} \\
+  \tr{x_1 : A_1, \ldots, x_n : A_n} & x_1 : \trc{A_1}, \ldots, x_n : \trc{A_n} \\[2ex]
+  \tr{x} & \frc{x} \\
+  \tr{n} & n \\
+  \tr{\slam{x{:}A} e} & \lam{x}{\trc{A}} \tr{e} \\
+  \tr{e_1\,e_2} & \tr{e_1}\,\prom{\tr{e_2}}
+\end{array}$
+\medskip
+
+\noindent
+The image of $P$ is
+\[
+  (\lam{g}{T} \frc{g}\,\prom{\lam{n}{N} \frc{g}\,\prom{\lam{m}{N} \frc{m}}})\;
+  \prom{(\lam{h}{T} \frc{h})\,\prom{\lam{f}{R} \frc{f}\,\prom{0}}}
+\]
+at the types below, with level variables $a, b, c, d$. For simplicity, $h$'s
+cell gets the same type $T$ as $g$'s.
+
+\medskip
+\noindent\quad
+$\begin{array}{@{}l@{\;\;=\;\;}l@{\qquad}l@{}}
+  N & \Prom{0}{\Nat} & \text{a $\snat$ cell} \\
+  F & N \arr{c} \Nat & \tr{\snat \to \snat} \\
+  R & \Prom{b}{F} & \text{$g$'s argument cell} \\
+  \tau_g & R \arr{d} \Nat & \tr{(\snat \to \snat) \to \snat} \\
+  T & \Prom{a}{\tau_g} & \text{$g$'s own cell}
+\end{array}$
+\medskip
+
+\section{Kinding}
+
+Kinding $T$ fixes how the four levels are ordered.
+
+\tree{
+  \inferrule*[right={\rn{Promise}\enspace$a \geq d$}]
+  {
+    \inferrule*[right={\rn{Arr}\enspace$d \geq b+1$}]
+    {
+      \inferrule*[right={\rn{Promise}\enspace$b \geq c$}]
+      {
+        \inferrule*[right={\rn{Arr}\enspace$c \geq 1$}]
+        {
+          \inferrule*[right={\rn{Promise}\enspace$0 \geq 0$}]
+            {\Nat :: \Type{0}}
+            {\Prom{0}{\Nat} :: \Type{1}}
+          \\
+          \Nat :: \Type{0}
+        }
+        {\Prom{0}{\Nat} \arr{c} \Nat :: \Type{c}}
+      }
+      {\Prom{b}{\Prom{0}{\Nat} \arr{c} \Nat} :: \Type{b+1}}
+      \\
+      \Nat :: \Type{0}
+    }
+    {\Prom{b}{\Prom{0}{\Nat} \arr{c} \Nat} \arr{d} \Nat :: \Type{d}}
+  }
+  {\Prom{a}{\Prom{b}{\Prom{0}{\Nat} \arr{c} \Nat} \arr{d} \Nat} :: \Type{a+1}}
+}
+
+\newpage
+\section{The invalid derivation}
+
+We use the free-variable $\lambda$ rule of \S3.1. The rule of Fig.~3 measures
+the whole context, so it only adds constraints. Each \rn{Lam} and \rn{Promise}
+label shows the value of its side condition. Every term that captures $g$ gets
+$a + 1$ from $T :: \Type{a+1}$.
+
+\tree{
+  \inferrule*[right=\rn{App}]
+  {
+    \inferrule*[right={\rn{Lam}\enspace$e \geq a+1$}]
+    {
+      \inferrule*[right=\rn{App}]
+      {
+        \inferrule*[right=\rn{Force}]{ }{g{:}T \vdash \frc{g} : \tau_g}
+        \\
+        \inferrule*[right={\rn{Promise}\enspace$b \geq a+1, c$}]
+        {
+          \inferrule*[right={\rn{Lam}\enspace$\bad{c \geq a+1}$}]
+          {
+            \inferrule*[right=\rn{App}]
+            {
+              \inferrule*[right=\rn{Force}]{ }{g{:}T, n{:}N \vdash \frc{g} : \tau_g}
+              \\
+              \inferrule*[right={\rn{Promise}\enspace$b \geq c$}]
+              {
+                \inferrule*[right={\rn{Lam}\enspace$c \geq 1$}]
+                {
+                  \inferrule*[right=\rn{Force}]{ }
+                    {g{:}T, n{:}N, m{:}N \vdash \frc{m} : \Nat}
+                }
+                {g{:}T, n{:}N \vdash \lam{m}{N} \frc{m} : F}
+              }
+              {g{:}T, n{:}N \vdash \prom{\lam{m}{N} \frc{m}} : R}
+            }
+            {g{:}T, n{:}N \vdash \frc{g}\,\prom{\lam{m}{N} \frc{m}} : \Nat}
+          }
+          {g{:}T \vdash \lam{n}{N} \frc{g}\,\prom{\lam{m}{N} \frc{m}} : F}
+        }
+        {g{:}T \vdash \prom{\lam{n}{N} \frc{g}\,\prom{\lam{m}{N} \frc{m}}} : R}
+      }
+      {g{:}T \vdash \frc{g}\,\prom{\lam{n}{N} \frc{g}\,\prom{\lam{m}{N} \frc{m}}} : \Nat}
+    }
+    {\vdash \lam{g}{T} \frc{g}\,\prom{\lam{n}{N} \frc{g}\,\prom{\lam{m}{N} \frc{m}}} : T \arr{e} \Nat}
+    \\
+    \mathcal{D}_G
+  }
+  {\vdash (\lam{g}{T} \frc{g}\,\prom{\lam{n}{N} \frc{g}\,\prom{\lam{m}{N} \frc{m}}})\;\prom{(\lam{h}{T} \frc{h})\,\prom{\lam{f}{R} \frc{f}\,\prom{0}}} : \Nat}
+}
+
+\noindent
+The argument is a promise for $G$. It captures nothing, so it types without
+trouble:
+
+\tree{
+  \mathcal{D}_G \;=\;
+  \inferrule*[right={\rn{Promise}\enspace$a \geq d$}]
+  {
+    \inferrule*[right=\rn{App}]
+    {
+      \inferrule*[right={\rn{Lam}\enspace$e' \geq a+1$}]
+      {
+        \inferrule*[right=\rn{Force}]{ }{h{:}T \vdash \frc{h} : \tau_g}
+      }
+      {\vdash \lam{h}{T} \frc{h} : T \arr{e'} \tau_g}
+      \\
+      \inferrule*[right={\rn{Promise}\enspace$a \geq d$}]
+      {
+        \inferrule*[right={\rn{Lam}\enspace$d \geq b+1$}]
+        {
+          \inferrule*[right=\rn{App}]
+          {
+            \inferrule*[right=\rn{Force}]{ }{f{:}R \vdash \frc{f} : F}
+            \\
+            \inferrule*[right={\rn{Promise}\enspace$0 \geq 0$}]
+            {
+              \inferrule*[right=\rn{Nat}]{ }{f{:}R \vdash 0 : \Nat}
+            }
+            {f{:}R \vdash \prom{0} : N}
+          }
+          {f{:}R \vdash \frc{f}\,\prom{0} : \Nat}
+        }
+        {\vdash \lam{f}{R} \frc{f}\,\prom{0} : \tau_g}
+      }
+      {\vdash \prom{\lam{f}{R} \frc{f}\,\prom{0}} : T}
+    }
+    {\vdash (\lam{h}{T} \frc{h})\,\prom{\lam{f}{R} \frc{f}\,\prom{0}} : \tau_g}
+  }
+  {\vdash \prom{(\lam{h}{T} \frc{h})\,\prom{\lam{f}{R} \frc{f}\,\prom{0}}} : T}
+}
+
+\newpage
+\section{The heap at run time}
+
+Recall the program and its translation:
+\[
+  P \;=\; (\slam{g} g\,(\slam{n} g\,(\slam{m} m)))\;
+          ((\slam{h} h)\,(\slam{f} f\,0))
+\]
+\[
+  \tr{P} \;=\;
+  \Big(\lam{g}{T} \frc{g}\,
+    \underbrace{\colorbox{red!15}{$\displaystyle
+      \prom{\lam{n}{N} \frc{g}\,
+        \underbrace{\prom{\lam{m}{N} \frc{m}}}_{f_2}}$}}_{f_1}\Big)\;
+  \underbrace{\prom{(\lam{h}{T} \frc{h})\,
+    \underbrace{\prom{\lam{f}{R} \frc{f}\,
+      \underbrace{\prom{0}}_{n,\ m}}}_{h}}}_{g}
+\]
+Each promise becomes a heap cell when it is evaluated. To keep the picture
+readable, we name each cell after the variable it is bound to. $g$'s function
+$\lam{f}{R} \frc{f}\,\prom{0}$ is called twice, so $f$ is bound to two
+different cells, $f_1$ and $f_2$, and its promise $\prom{0}$ becomes two cells,
+bound to $n$ in the first call and to $m$ in the second. The highlighted
+promise $f_1$ is the problem. It captures $g$, and it is passed to $g$'s
+function.
+
+The figure shows the heap when the program finishes, with every promise
+memoized. Each cell sits in the universe band of its type, and cells are
+ordered left to right by when they are allocated. A stratified heap only lets
+a cell point down, into lower universes (the paper's ``past regions''). The
+same goes for arguments: the function stored in a cell may only be applied to
+cells below it.
+
+\begin{center}
+\begin{tikzpicture}[
+    x=3.4cm, y=2.6cm,
+    cell/.style={draw, rounded corners=2pt, fill=white, align=center,
+                 inner sep=4pt, minimum width=2.9cm, font=\small},
+    dead/.style={cell, draw=black!35, text=black!45},
+    band/.style={fill=black!6, draw=none},
+    stored/.style={-{Stealth[length=2.5mm]}, thick},
+    arg/.style={-{Stealth[length=2.5mm]}, dashed, black!60},
+    bad/.style={stored, red!75!black, line width=1.2pt},
+    lbl/.style={font=\footnotesize, fill=white, inner sep=1.5pt},
+  ]
+
+  % universe bands, ordered 1 <= c <= b < b+1 <= d <= a < a+1
+  \foreach \y/\name in {0/{\Type{1}}, 1/{\Type{b+1}}, 2/{\Type{a+1}}} {
+    \fill[band] (0.35, \y - 0.38) rectangle (6.65, \y + 0.38);
+    \node[anchor=east, font=\small] at (0.3, \y) {$\name$};
+  }
+  \draw[-{Stealth}, black!50] (-0.15, -0.45) -- (-0.15, 2.6)
+    node[above, font=\small] {universe};
+  \draw[-{Stealth}, black!50] (0.6, -0.6) -- (6.6, -0.6)
+    node[midway, below, font=\small] {allocation order};
+
+  % cells: x = allocation order, y = universe
+  \node[cell] (g)  at (1, 2) {$g$ \\[2pt] $\lam{f}{R} \frc{f}\,\prom{0}$};
+  \node[dead] (h)  at (2, 2) {$h$ \\[2pt] $\lam{f}{R} \frc{f}\,\prom{0}$};
+  \node[cell, fill=red!8] (c)  at (3, 1)
+    {$f_1$ \\[2pt] $\lam{n}{N} \frc{g}\,\prom{\lam{m}{N} \frc{m}}$};
+  \node[cell] (z1) at (4, 0) {$n$ \\[2pt] $0$};
+  \node[cell] (id) at (5, 1) {$f_2$ \\[2pt] $\lam{m}{N} \frc{m}$};
+  \node[cell] (z2) at (6, 0) {$m$ \\[2pt] $0$};
+
+  % the captured variable that breaks stratification: up to a higher universe
+  \draw[bad] (c.north west) to[bend left=8] (g.south east);
+  \node[lbl, text=red!75!black, align=left, anchor=west]
+    at ($(c.north west)!0.5!(g.south east) + (0.25, 0.05)$)
+    {$f_1$ captures $g$};
+
+  % applications at run time
+  \draw[arg] (g.south) .. controls +(0, -0.5) and +(-0.5, 0.2) .. (c.west);
+  \draw[arg] (g.north east) .. controls +(1.5, 0.45) and +(0, 0.55) .. (id.north);
+  \draw[arg] (c.south) -- (z1.north west);
+  \draw[arg] (id.south) -- (z2.north west);
+
+  % legend
+  \begin{scope}[shift={(0.6, -1.05)}]
+    \draw[arg] (0, 0) -- (0.3, 0);
+    \node[anchor=west, font=\footnotesize] at (0.33, 0)
+      {the function in one cell is applied to the other};
+    \draw[bad] (2.75, 0) -- (3.05, 0);
+    \node[anchor=west, font=\footnotesize] at (3.08, 0)
+      {captures a cell in a higher universe};
+    \node[dead, minimum width=0pt, inner sep=2pt, font=\footnotesize]
+      (gb) at (5.4, 0) {$x$};
+    \node[anchor=west, font=\footnotesize] at (gb.east) {garbage};
+  \end{scope}
+\end{tikzpicture}
+\end{center}
+
+\begin{itemize}
+  \item $g$ holds $G$. Forcing it evaluates $(\lam{h}{T} \frc{h})\,\prom{\cdots}$,
+    which allocates $h$. Both end up holding $\lam{f}{R} \frc{f}\,\prom{0}$,
+    which captures nothing. Afterwards $h$ is garbage.
+  \item $g$'s function is applied to $f_1$ and then to $f_2$. Both sit in
+    $\Type{b+1}$, below $g$, as stratification requires.
+  \item Each call forces its $f$ and applies the result to a fresh
+    $\prom{0}$: $n$ in the first call, $m$ in the second. Those sit lower
+    still, in $\Type{1}$.
+  \item $f_1$'s value captures $g$, so it points up, from $\Type{b+1}$ into
+    $\Type{a+1}$. This is the highlighted side condition $c \geq a+1$ of the
+    derivation.
+\end{itemize}
+The run-time heap is acyclic. $f_1$ only points to $g$, which was allocated
+earlier and holds a value that points nowhere. The problem is that the two
+orders disagree: $f_1$ points to the past in time, but into the future in
+universes. $g$ must sit above $f_1$ because $g$'s function is applied to $f_1$.
+$f_1$ must sit above $g$ because it captures $g$.
+
+\section{Why no levels work}
+
+The highlighted side condition, combined with kinding, gives
+\[
+  c \;\geq\; a + 1 \;\geq\; d + 1 \;\geq\; b + 2 \;\geq\; c + 2,
+\]
+which no choice of levels satisfies. Both $+1$s come from the \rn{Promise}
+kinding rule, that is, from the $\mathsf{Ref}$ inside a promise:
+\begin{itemize}
+  \item $d \geq b + 1$: $g$'s argument is a promise, so $\tau_g$ has a
+    promise domain.
+  \item $c \geq a + 1$: the closure $\lam{n}{N} \cdots$ captures $g$, and $g$
+    is a promise.
+\end{itemize}
+Under the call-by-value translation (the identity) there are no promises, and
+$P$ types with every level at $0$.
+
+\end{document}
