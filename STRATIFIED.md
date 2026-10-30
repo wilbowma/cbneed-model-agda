@@ -60,12 +60,19 @@ must live.
 ### The program
 
 ```
-(λg. g (λn. g (λm. m)))  G        where  G = (λh. h) (λf. f 0)
+P = λg. g (λn. g (λm. m))         : ((nat → nat) → nat) → nat
 ```
 
-Here `g : (nat → nat) → nat`. `G` is not a value, so `g`'s cell starts as a
-thunk. Call-by-need forces it once and memoizes the result, however many times
-`g` is used.
+`P` calls `g` twice, and the outer call passes a function that itself calls
+`g`. `P` alone has no stratified translation, so no program that uses it has
+one either.
+
+The translation below allocates a promise for every argument, even a value.
+That is naive, but it doesn't matter. Without loss of generality, `P` is
+applied to a computation such as `(λh. h) (λf. f 0)`. Then `g`'s cell can't be
+avoided, because copying it would evaluate the computation once per use, which
+is call-by-name. A translation that passes values directly still has that one
+shared cell, and the chase below still fails, with a gap of 1 instead of 2.
 
 ### By translation to λPR
 
@@ -95,7 +102,7 @@ type-checks, because `λ_:Unit. v` only captures `v : τ`.
 The program becomes
 
 ```
-(λg. ⌊g⌋ ⌈λn. ⌊g⌋ ⌈λm. ⌊m⌋⌉⌉)  ⌈(λh. ⌊h⌋) ⌈λf. ⌊f⌋ ⌈0⌉⌉⌉
+λg. ⌊g⌋ ⌈λn. ⌊g⌋ ⌈λm. ⌊m⌋⌉⌉
 ```
 
 `counterexample.tex` (built as `counterexample.pdf`) typesets the translation
@@ -160,7 +167,8 @@ levels. Using `g` at two levels has only two possible meanings, and both fail:
   heaps at every level, including layers above its own cell. That is the
   circular `Store ≅ Store → …` again.
 - **Two copies of `g`, one per level.** Elaborate `g`'s thunk once per use.
-  Then `G` is evaluated twice, which is call-by-name for `g`. The source
+  When `P` is applied to a computation, that computation is evaluated twice,
+  which is call-by-name for `g`. The source
   language cannot observe the difference, but the heap no longer models
   call-by-need: there are two cells where there should be one.
 
@@ -219,7 +227,8 @@ Possible directions:
 
 1. **Don't memoize syntactic values.** A thunk that is already a λ can be
    copied per level without losing sharing, though its captured cells still
-   constrain it. This handles `g` bound to a literal λ, but not to `G` above.
+   constrain it. This handles `g` bound to a literal λ, but not `P` applied
+   to a computation.
 2. **Defunctionalize.** Store syntax plus environments of locations, so the
    heap is first-order. There is no circularity, but termination then needs a
    logical relation instead of structural recursion.
