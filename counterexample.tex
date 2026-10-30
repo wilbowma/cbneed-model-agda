@@ -737,6 +737,119 @@ $\tr{P}$ and $\tr{P}\,\prom{(\slam{h} h)\,(\slam{f} f\,0)}$ do.
     every level.
 \end{itemize}
 
+\section{Why no shallow model covers STLC}
+\label{sec:obstruction}
+
+The original goal was a shallow embedding of call-by-need STLC in Agda.
+Types are Agda types, terms are Agda functions, the heap holds semantic
+values, and everything is total by structural recursion. The heap is
+unobservable to programs. What we want to see is its behaviour: what is
+allocated and when, and what is forced. \texttt{Stratified.agda} achieves this
+for a fragment. This section explains why no choice of worlds extends it to
+all of STLC, and why \S\ref{sec:lr} puts syntax in the heap instead.
+
+\paragraph{The domain equation is the type-world circularity.}
+A shallow model with a heap has the shape
+\[
+\begin{array}{@{}l@{\;\;=\;\;}l@{}}
+  \mathit{Comp}\,\tau\,W & \mathit{Heap}\,W \to
+    \Sigma\,W' \ext W.\ \mathit{Heap}\,W' \times \mathit{Val}\,\tau\,W' \\
+  \mathit{Heap}\,W & \prod_{(\ell : \sigma) \in W}
+    \mathit{Val}\,\sigma\,W \uplus \mathit{Comp}\,\sigma\,W \\
+  \mathit{Val}\,(A \to B)\,W & \forall W' \ext W.\
+    \mathit{Loc}\,W'\,A \to \mathit{Comp}\,B\,W'
+\end{array}
+\]
+$\mathit{Heap}$ occurs negatively in its own definition. Even when $W$ is
+syntactic, as in \texttt{Stratified.agda}, $\mathit{Heap}\,W$ is the
+interpretation of $W$, cell by cell. This is Ahmed's equation, with the
+heap's type playing the semantic world:
+\[
+  \mathit{Type} = \mathit{World} \to \mathcal{P}(\mathit{Val})
+  \quad\sim\quad \mathit{Comp}\ \text{reads}\ \mathit{Heap},
+  \qquad
+  \mathit{World} = \mathit{Loc} \rightharpoonup \mathit{Type}
+  \quad\sim\quad \mathit{Heap}\,W = \textstyle\prod_\ell
+    \llbracket W(\ell) \rrbracket.
+\]
+Agda accepts such a definition only with a well-founded measure that
+decreases from a cell's domain to the heaps that domain reads. Levels are
+such a measure: $\mathit{Heap}_{k+1}$ contains only $\mathit{Val}_k$ and
+$\mathit{Comp}_k$.
+
+\paragraph{The counterexample defeats every measure.}
+Run $P$ on $\slam{f} f\,0$, as in \S5, and write $D(x)$ for the Agda type
+interpreting the contents of cell $x$.
+\begin{itemize}
+  \item $g$ holds a function that forces its argument $f_1$, so $D(g)$ takes
+    heaps containing $f_1$: $\mu(g) > \mu(f_1)$.
+  \item $f_1$ holds a thunk that forces $g$, so $D(f_1)$ takes heaps
+    containing $g$: $\mu(f_1) > \mu(g)$.
+\end{itemize}
+Both inequalities come from the definitions of the domains, not from any
+particular run.
+
+\paragraph{Capture versus use.}
+The history is stratified: every pointer out of a cell points to that cell's
+past (\S5, \S\ref{sec:lr}). But that orders what a cell's contents
+\emph{capture}. Defining $D$ needs what they \emph{do}, and functions are
+applied in the future. $g$'s function captures nothing, yet it is applied to
+$f_1$, which is created after $g$ and reads $g$. Suppose $g$'s contents were
+interpreted in a world containing only cells up to $g$. Then $g$'s function
+could only be applied to cells up to $g$, which is exactly
+$\lambda_{\mathrm{PR}}$'s restriction, and the chain of \S\ref{sec:why}
+returns.
+
+\paragraph{Fixes that fail.}
+\begin{itemize}
+  \item \emph{Measure by type.} $f_1 : F$ reads $g : \tau_g$, a larger type.
+  \item \emph{Measure by allocation time or dependency position.} These grow
+    with the history, and the future is unbounded.
+  \item \emph{Levels chosen at run time and recorded in the world.} $g$'s
+    value, and so its level, is fixed before $f_1$ exists. $f_1$ must sit
+    above $g$'s cell, out of reach of $g$'s function.
+  \item \emph{Separate structures for forced and unforced cells.} The cycle
+    passes through both: when $g$'s function is applied, $g$ is forced and
+    $f_1$ is not.
+  \item \emph{Level-polymorphic stored functions.} This is impredicative. In
+    Agda, such a value lives in $\mathsf{Set}\omega$, and no cell can hold
+    it. An impredicative universe does not help, because the equation is not
+    positive, and impredicativity is inconsistent with
+    non-strictly-positive inductive types (Coquand and Paulin-Mohring).
+  \item \emph{One copy of $g$ per use.} That is call-by-name: two cells
+    where call-by-need has one.
+\end{itemize}
+Execution, unlike definition, is well-founded. Forcing a cell runs only on
+its dependency prefix and the cells it allocates, so even the inner call of
+$g$'s function, inside the forcing of $f_1$, happens in a world without
+$f_1$. But $D(g)$ must also cover the outer call, which happens in a world
+containing $f_1$. \S\ref{sec:lr} exploits the well-founded execution and
+never defines $D$.
+
+\paragraph{What remains.}
+\begin{itemize}
+  \item \emph{The stratified fragment.} \texttt{Stratified.agda} is shallow
+    and total on the programs whose translation $\lambda_{\mathrm{PR}}$
+    accepts, if the conjecture of STRATIFIED.md holds.
+  \item \emph{A budget.} An index that shrinks as the history grows, such as
+    the number of forces remaining, is well-founded. It gives a shallow,
+    total model with a $\mathit{timeout}$ outcome. Showing that some budget
+    always suffices needs the relation of \S\ref{sec:lr}. Guarded recursion
+    is the type-theoretic form of the same idea, and its results arrive
+    under a later modality.
+  \item \emph{Syntax in the heap.} Cells hold codes, and the meaning of a code
+    is supplied by the type of the pointer to it (\S\ref{sec:lr},
+    \texttt{Promises.agda}). Terms are deep, but the relation is defined by
+    structural recursion on types, and \texttt{run} is a total evaluator.
+  \item \emph{No heap.} Promises interpreted as $\Unit \to \tau$, or
+    call-by-need as clairvoyant call-by-value (Hackett and Hutton). Both are
+    shallow and total, but neither has cells to allocate.
+\end{itemize}
+We take syntax in the heap. Each world records every allocation and every
+memoization, so the allocation behaviour is visible, and
+\texttt{Promises.agda} checks it for $P$: six cells, five forced, one never
+forced. Deallocation is not modelled yet.
+
 \section{Worlds compared}
 \label{sec:worlds}
 

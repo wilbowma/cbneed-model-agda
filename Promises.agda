@@ -7,7 +7,9 @@
 -- contain no types, so there is no type-world circularity.
 --
 -- Terms and stores are syntax. That is essential: a store of Agda
--- functions would be Store ≅ Store → …, which Agda rejects. Here the
+-- functions would be Store ≅ Store → …, which Agda rejects. That is the
+-- type-world circularity again, with the heap's type playing the
+-- semantic world (counterexample.tex, §9). Here the
 -- meaning of a cell is carried by the type of the pointer to it, not by
 -- the store. Environments replace substitution, so no substitution
 -- lemmas are needed.
