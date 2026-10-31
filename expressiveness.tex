@@ -1,0 +1,541 @@
+\documentclass[11pt]{article}
+\usepackage[letterpaper,left=1in,right=2.3in,top=1in,bottom=1in,
+            marginparwidth=1.8in,marginparsep=0.2in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{stmaryrd}
+\usepackage{mathpartir}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+
+\newtheorem{definition}{Definition}
+\newtheorem{conjecture}{Conjecture}
+\newtheorem{lemma}{Lemma}
+\theoremstyle{remark}
+\newtheorem*{remark}{Remark}
+
+% review notes for the author
+\newcommand{\todo}[1]{\marginpar{\raggedright\footnotesize\textcolor{red!70!black}{\textbf{TODO:} #1}}}
+
+% languages
+\newcommand{\lpr}{\lambda_{\mathrm{PR}}}
+\newcommand{\Nat}{\mathsf{Nat}}
+\newcommand{\Unit}{\mathsf{Unit}}
+\newcommand{\tRef}{\mathsf{Ref}\,}
+\newcommand{\Type}[1]{\mathsf{Type}_{#1}}
+\newcommand{\arr}[1]{\xrightarrow{#1}}
+\newcommand{\new}{\mathsf{new}\,}
+\newcommand{\deref}{!\,}
+\newcommand{\assign}{\mathrel{:=}}
+\newcommand{\unit}{\langle\rangle}
+\newcommand{\lam}[2]{\lambda #1{:}#2.\,}
+\newcommand{\klet}{\mathsf{let}\ }
+\newcommand{\kin}{\ \mathsf{in}\ }
+\newcommand{\Prom}[2]{\lceil #2 \rceil^{#1}}
+\newcommand{\prom}[1]{\lceil #1 \rceil}
+\newcommand{\frc}[1]{\lfloor #1 \rfloor}
+\newcommand{\snat}{\mathsf{nat}}
+\newcommand{\slam}[1]{\lambda #1.\,}
+\newcommand{\tr}[1]{\llbracket #1 \rrbracket}
+\newcommand{\ext}{\sqsupseteq}
+\newcommand{\Heap}{\mathit{Heap}}
+\newcommand{\Comp}{\mathit{Comp}}
+\newcommand{\Val}{\mathit{Val}}
+\newcommand{\Loc}{\mathit{Loc}}
+
+\title{Sharing is not intensionally macro-expressible\\
+       in predicative type theory}
+\author{}
+\date{Draft}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+  Call-by-need STLC is total, and pure promises are harmless in type theory:
+  a promise can be read as a function from $\Unit$. Yet we have been unable
+  to give call-by-need STLC a shallow embedding in a predicative type theory
+  in which the heap is a semantic object. We argue that this is not an
+  accident of one construction. A semantic heap of thunks is an instance of
+  the type-world circularity, and a single program, $P = \slam{g} g\,(\slam{n}
+  g\,(\slam{m} m))$, defeats every well-founded stratification of it. We
+  make the claim precise as a failure of \emph{intensional
+  macro-expressibility}: Felleisen's homomorphic translations, required to
+  preserve types and to preserve time and space up to constant factors.
+  Under that definition, $\lpr$'s universe levels are exactly the price of
+  embedding stateful programs in type theory, and the level-free promise
+  calculus is more expressive than predicative type theory.
+\end{abstract}
+
+\section{Introduction}
+
+The goal that started this work was a shallow embedding of call-by-need STLC
+in Agda: types as Agda types, terms as Agda functions, a heap holding
+semantic values, and totality by structural recursion alone. The heap is not
+observable by programs. We want it because it determines \emph{cost}: what is
+allocated, what is forced, what is shared, and what becomes garbage.
+
+A stratified model, in the style of $\lpr$~\cite{koronkevich2025}, gets
+partway. It is shallow and total, but it covers only a fragment of STLC. The
+program
+\[
+  P \;\triangleq\; \slam{g} g\,(\slam{n} g\,(\slam{m} m))
+  \;:\; ((\snat \to \snat) \to \snat) \to \snat
+\]
+is outside the fragment, and no choice of levels admits it. A logical
+relation over syntactic stores does cover all of STLC, and proves
+termination with no levels at all, but it puts syntax in the heap.
+
+This note asks what that gap means. Our answers:
+\begin{itemize}
+  \item The circularity a shallow heap meets is the type-world circularity,
+    with the heap's type playing the semantic world (\S\ref{sec:circ}).
+  \item $P$ defeats every well-founded measure on that circularity, not just
+    universe levels (\S\ref{sec:obstruction}).
+  \item The gap is invisible to observational notions of expressiveness, but
+    a cost-sensitive variant of Felleisen's macro-expressibility captures it
+    (\S\ref{sec:cost}, \S\ref{sec:def}).
+  \item Under that notion we conjecture that $\lpr$ is expressible in
+    predicative type theory and call-by-need STLC is not
+    (\S\ref{sec:conj}). The dividing line is Felleisen's homomorphism
+    condition: a translation may use the translations of subterms, but not
+    their syntax.
+\end{itemize}
+Companion artefacts:
+\texttt{counterexample.tex} has the derivations and the logical relation in
+detail; \texttt{Stratified.agda} is the stratified shallow model; and
+\texttt{Promises.agda} mechanizes the syntactic model.
+
+\section{Background}
+
+\subsection{$\lpr$}
+
+$\lpr$ is a call-by-value calculus with higher-order references and a
+hierarchy of universes~\cite{koronkevich2025}. A reference costs a level:
+$\tRef \tau :: \Type{i+1}$ when $\tau :: \Type{i}$. A function type carries a
+level, $\tau_1 \arr{k} \tau_2$, and a $\lambda$ at level $k$ requires
+$k \geq \max(\mathit{levels}(\mathit{FV}(e)), \tau_1, \tau_2)$, a non-strict
+bound, because functions are immutable. Each universe is a Kripke world: a
+world at level $k+1$ maps locations to semantic types at levels $\le k$,
+which breaks the type-world circularity.
+\todo{Check the statement of the free-variable $\lambda$ rule against \S3.1 of the paper.}
+
+\subsection{Call-by-need as promises}
+
+A promise is a memoizing thunk. Encoded in $\lpr$:
+\[
+\begin{array}{@{}l@{\;\;\triangleq\;\;}l@{}}
+  \Prom{k}{\tau} & \tRef (\Unit \arr{k} \tau) \\
+  \prom{e} & \new (\lam{\_}{\Unit} e) \\
+  \frc{x} & \klet v = (\deref x)\,\unit \kin x \assign (\lam{\_}{\Unit} v);\ v
+\end{array}
+\]
+so that $\Prom{k}{\tau} :: \Type{k+1}$. The translation of call-by-need STLC
+makes every variable and every argument a promise:
+\[
+\begin{array}{@{}l@{\;\;=\;\;}l@{\qquad\qquad}l@{\;\;=\;\;}l@{}}
+  \tr{\snat} & \Nat & \tr{x} & \frc{x} \\
+  \tr{A \to B} & \Prom{j}{\tr{A}} \arr{k} \tr{B} &
+  \tr{\slam{x{:}A} e} & \lam{x}{\Prom{j}{\tr{A}}} \tr{e} \\
+  \multicolumn{2}{l}{} & \tr{e_1\,e_2} & \tr{e_1}\,\prom{\tr{e_2}}
+\end{array}
+\]
+
+\subsection{The witness}
+
+The image of $P$ is
+$\lam{g}{T} \frc{g}\,\prom{\lam{n}{N} \frc{g}\,\prom{\lam{m}{N} \frc{m}}}$,
+with $N = \Prom{0}{\Nat}$, $F = N \arr{c} \Nat$, $R = \Prom{b}{F}$,
+$\tau_g = R \arr{d} \Nat$ and $T = \Prom{a}{\tau_g}$. Kinding gives
+$c \geq 1$, $b \geq c$, $d \geq b+1$ and $a \geq d$. The closure
+$\lam{n}{N} \cdots$ captures $g$, so $c \geq a+1$. Together:
+\[
+  c \;\geq\; a+1 \;\geq\; d+1 \;\geq\; b+2 \;\geq\; c+2.
+\]
+Both $+1$s are the $\mathsf{Ref}$ inside a promise: $g$'s argument is a
+cell, and the closure captures $g$'s cell. Read as a plain CBV term, $P$
+types with every level at $0$: the same cycle, with every edge non-strict.
+Passing values instead of promises where possible does not help: when $P$ is
+applied to a computation, $g$'s cell is unavoidable, and the chain becomes
+$c \geq a+1 \geq d+1 \geq c+1$.
+
+Running $P$ on $\slam{f} f\,0$ allocates a cell $g$, then a cell $f_1$
+holding $\slam{n} g\,(\slam{m} m)$, which captures $g$ and is passed to $g$'s
+function. The heap at run time is acyclic: $f_1$ points to $g$, which points
+nowhere. But $g$ must sit above $f_1$, because $g$'s function is applied to
+$f_1$, and $f_1$ must sit above $g$, because it captures $g$.
+
+\section{The shallow heap is the type-world circularity}
+\label{sec:circ}
+
+A shallow model of call-by-need with a heap has the shape
+\[
+\begin{array}{@{}l@{\;\;=\;\;}l@{}}
+  \Comp\,\tau\,W & \Heap\,W \to
+    \Sigma\,W' \ext W.\ \Heap\,W' \times \Val\,\tau\,W' \\
+  \Heap\,W & \prod_{(\ell : \sigma) \in W}
+    \Val\,\sigma\,W \uplus \Comp\,\sigma\,W \\
+  \Val\,(A \to B)\,W & \forall W' \ext W.\
+    \Loc\,W'\,A \to \Comp\,B\,W'
+\end{array}
+\]
+$\Heap$ occurs negatively in its own definition. Even when worlds $W$ are
+syntactic lists of types, $\Heap\,W$ is the interpretation of $W$, cell by
+cell. That is Ahmed's equation~\cite{ahmed2004}, with the heap's type
+playing the semantic world:
+\[
+\begin{array}{@{}l@{\qquad\sim\qquad}l@{}}
+  \mathit{Type} = \mathit{World} \to \mathcal{P}(\Val)
+    & \Comp\ \text{reads}\ \Heap \\
+  \mathit{World} = \Loc \rightharpoonup \mathit{Type}
+    & \Heap\,W = \textstyle\prod_\ell \llbracket W(\ell) \rrbracket
+\end{array}
+\]
+\todo{Cite Ahmed's thesis (or Ahmed, Appel and Virga) for the type-world circularity; confirm the right reference.}
+A predicative type theory accepts such a definition only with a well-founded
+measure that decreases from a cell's domain to the heaps that domain reads.
+$\lpr$'s levels are such a measure, and so are Agda's universe levels: a
+stratified model puts only $\Val_k$ and $\Comp_k$ in $\Heap_{k+1}$.
+
+The four models of higher-order state we know of avoid the circularity in
+four ways:
+\begin{itemize}
+  \item $\lpr$ stratifies worlds by universe level.
+  \item Extended $L^3$ consults its store typing only at a smaller
+    step index~\cite{ahmed2007}.
+  \item Full ground references restrict contents to first-order data, so
+    the heap's interpretation never reads a heap~\cite{kammar2017}.
+  \item The syntactic model of promises never forms the heap's
+    interpretation at all: cells hold syntax, and the meaning of a cell is
+    carried by the type of the pointer to it.
+\end{itemize}
+
+\section{The obstruction}
+\label{sec:obstruction}
+
+\paragraph{The witness defeats every measure.}
+Run $P$ on $\slam{f} f\,0$, and write $D(x)$ for the type interpreting the
+contents of cell $x$.
+\begin{itemize}
+  \item $g$ holds a function that forces its argument $f_1$, so $D(g)$ takes
+    heaps containing $f_1$: $\mu(g) > \mu(f_1)$.
+  \item $f_1$ holds a thunk that forces $g$, so $D(f_1)$ takes heaps
+    containing $g$: $\mu(f_1) > \mu(g)$.
+\end{itemize}
+Both inequalities come from the definitions of the domains, not from any
+particular run.
+
+\paragraph{Capture versus use.}
+The history of a run is stratified: every pointer out of a cell points into
+that cell's past, if cells allocated while forcing a cell are ordered just
+before it. But that orders what a cell's contents \emph{capture}. Defining
+$D$ needs what they \emph{do}, and functions are applied in the future. $g$'s
+function captures nothing, yet it is applied to $f_1$, which is created after
+$g$ and reads $g$. Interpreting $g$'s contents in a world of cells up to $g$
+means $g$'s function can only be applied to cells up to $g$, which is
+$\lpr$'s restriction again.
+
+\paragraph{Fixes that fail.}
+\begin{itemize}
+  \item \emph{Measure by type.} $f_1 : F$ reads $g : \tau_g$, a larger type.
+  \item \emph{Measure by allocation time or dependency position.} These grow
+    with the history, and the future is unbounded.
+  \item \emph{Levels chosen at run time.} $g$'s value, and so its level, is
+    fixed before $f_1$ exists, and $f_1$ must sit above $g$'s cell.
+  \item \emph{Separate structures for forced and unforced cells.} The cycle
+    passes through both: when $g$'s function is applied, $g$ is forced and
+    $f_1$ is not.
+  \item \emph{Level-polymorphic stored functions.} This is impredicative: in
+    Agda such a value lives in $\mathsf{Set}\omega$, and no cell can hold it.
+    An impredicative universe does not help, because the equation is not
+    positive, and impredicativity is inconsistent with non-strictly-positive
+    inductive types~\cite{coquand1990}.
+    \todo{Confirm the Coquand--Paulin-Mohring result and its exact statement (positive but not strictly positive types with impredicative Prop).}
+  \item \emph{One copy of $g$ per use.} That is call-by-name; \S\ref{sec:cost}
+    shows the cost can be exponential.
+\end{itemize}
+
+\paragraph{Execution is well-founded; definition is not.}
+Forcing a cell runs only on its dependency prefix and the cells it
+allocates. Even the inner call of $g$'s function, inside the forcing of
+$f_1$, happens in a world without $f_1$. But $D(g)$ must also cover the outer
+call, in a world containing $f_1$. The syntactic model exploits the
+well-founded execution and never defines $D$.
+
+\section{Why the heap matters: cost}
+\label{sec:cost}
+
+The heap is unobservable, so any notion of expressiveness that looks only at
+results sees nothing. But the observationally correct translations of
+promises are wrong for cost:
+\begin{itemize}
+  \item \emph{Call-by-name}, $\prom{e} \mapsto \lam{\_}{\Unit} e$, loses
+    sharing. In
+    $\klet x_1 = x_0 + x_0, \ldots, x_n = x_{n-1} + x_{n-1}$,
+    call-by-need does linear work and call-by-name does $2^n$.
+  \item \emph{Call-by-value}, $\prom{e} \mapsto e$, does work that
+    call-by-need avoids: $(\slam{x} 0)\,e$ costs as much as $e$, with no
+    bound relative to the source.
+\end{itemize}
+Call-by-need is defined by its cost: never compute what is not needed, and
+never compute anything twice.
+
+\paragraph{Time and space.}
+Time needs only a count of forces and steps, which a tick monad provides
+without a heap, as in Danielsson's \textsf{THUNK} monad~\cite{danielsson2008}.
+Space needs the pointer structure: live space is defined by reachability, so
+the semantics must know what points to what. Allocation and deallocation
+behaviour is exactly what ticks cannot express.
+\todo{Check Danielsson's THUNK monad: tracks time (ticks) for lazy data structures, not space.}
+
+\paragraph{Precedents.}
+The cost-sensitive view of correctness is standard:
+\begin{itemize}
+  \item Improvement theory for call-by-need judges program transformations
+    by whether they preserve or improve time~\cite{moran1999} and
+    space~\cite{gustavsson1999,gustavsson2001} up to constant factors.
+    \todo{Verify Moran--Sands (time) and Gustavsson--Sands (space) and the ``up to constant factors'' formulation.}
+  \item Safe-for-space compilation counts a translation correct only if it
+    preserves space complexity~\cite{shao1994,paraskevopoulou2019}.
+    \todo{Verify Shao--Appel citation (year, venue) and Paraskevopoulou--Appel ICFP 2019.}
+  \item Okasaki's amortized bounds for lazy data structures hold only with
+    memoization~\cite{okasaki1998}, and Pottier et al.\ verify such bounds
+    for thunks in Iris, relying on its step-indexing~\cite{pottier2024}.
+    \todo{Check the author list and venue of Thunks and Debits, and that the step-indexing claim is fair.}
+\end{itemize}
+
+\paragraph{Reflecting cost versus preserving it.}
+A semantics may \emph{reflect} cost, if its denotation computes the cost,
+or a translation may \emph{preserve} cost, if running it in the host has the
+same complexity. These differ:
+\begin{center}
+\small
+\begin{tabular}{@{}lccc@{}}
+  \toprule
+  & reflects time & reflects space & preserves cost (CBV host) \\
+  \midrule
+  call-by-name thunks & no & no & no \\
+  ticks~\cite{danielsson2008} & yes & no & no \\
+  clairvoyant CBV~\cite{hackett2019} & yes & ? & no \\
+  identity in a lazy host & no & no & only by accident \\
+  semantic heap (stratified) & yes & yes & yes \\
+  syntax in the heap & yes & yes & yes, with deep terms \\
+  \bottomrule
+\end{tabular}
+\end{center}
+\todo{Clairvoyant CBV (Hackett--Hutton): confirm it reflects time; does it say anything about space? Does evaluating it explore all choices?}
+Only a heap gives all three. We take this as the justification for asking a
+translation to keep the heap.
+
+\section{Intensional macro-expressibility}
+\label{sec:def}
+
+Felleisen~\cite{felleisen1991} calls a construct $F$ of a conservative
+extension $L_2 \supseteq L_1$ macro-expressible in $L_1$ when a translation
+$\varphi$ is the identity on $L_1$, is homomorphic,
+$\varphi(F(e_1, \ldots, e_n)) = A[\varphi(e_1), \ldots, \varphi(e_n)]$ for a
+fixed $L_1$-context $A$, and preserves termination.
+\todo{Check Felleisen's definitions: macro-expressibility, conservative extension, and what is preserved (termination vs observational equivalence).}
+Taken directly:
+\begin{itemize}
+  \item Promises with an unobservable heap are macro-expressible by thunks.
+    There is no gap.
+  \item $\lpr$'s references are not macro-expressible in pure type theory,
+    but only because state is not: $\klet x = e \kin (x, x)$ and $(e, e)$
+    are equivalent in a pure language and not once $\new$ exists. This is
+    equally true of ML, and has nothing to do with stratification.
+\end{itemize}
+Neither sees the intensional gap. We keep the homomorphism condition and
+change what must be preserved.
+
+\begin{definition}[Intensional macro-expressibility]
+  Fix a target type theory $\mathcal{T}$ with a cost model, such as
+  call-by-value evaluation. A source language $L$ with a heap is
+  \emph{intensionally macro-expressible} in $\mathcal{T}$ if there is a
+  translation $\varphi$ that is
+  \begin{enumerate}
+    \item \emph{typed}: source types map to $\mathcal{T}$ types, and
+      well-typed terms to well-typed terms;
+    \item \emph{homomorphic}: each construct maps to a fixed
+      $\mathcal{T}$-context applied to the translations of its immediate
+      subterms, never to their syntax. Pure constructs may change, so
+      store-passing translations are allowed;
+    \item \emph{cost-adequate}: for every closed program, $\varphi(e)$ yields
+      the same result, and its time and maximum live space under the cost
+      model of $\mathcal{T}$ are within constant factors of those of $e$.
+  \end{enumerate}
+\end{definition}
+
+\begin{remark}[Homomorphism excludes codes]
+  The syntactic model satisfies typing and cost adequacy, and its
+  fundamental lemma is compositional on typing derivations. But the case for
+  $\prom{e}$ stores the closure $\mathit{thunk}\;e\;\rho$, the syntax of $e$,
+  rather than the denotation of $e$. It is homomorphic only in a target with
+  quotation. The line between a shallow model and syntax in the heap is
+  exactly Felleisen's homomorphism condition.
+\end{remark}
+
+\begin{remark}[The cost model must be fixed]
+  Type theory has no evaluation strategy of its own. Without a fixed cost
+  model, $\prom{e} \mapsto e$ compiled through a lazy host such as GHC is
+  cost-adequate by accident of the implementation. Fixing call-by-value
+  makes sharing visible in the translation.
+\end{remark}
+
+\begin{remark}[Why not exact heap adequacy]
+  A one-to-one correspondence of cells would also do, and the stratified
+  model satisfies it. Constant factors are weaker, allow optimizations such
+  as passing values unboxed, and match improvement theory.
+\end{remark}
+
+\section{The conjecture}
+\label{sec:conj}
+
+\begin{conjecture}
+  Let $\mathcal{T}$ be a predicative type theory: Martin-L\"of type theory
+  with a cumulative hierarchy of universes and strictly positive inductive
+  families, whose definitions are structurally recursive, with
+  call-by-value cost.
+  \begin{enumerate}
+    \item $\lpr$ is intensionally macro-expressible in $\mathcal{T}$.
+    \item Call-by-need STLC is not.
+  \end{enumerate}
+\end{conjecture}
+\todo{This is a conjecture. Part 1 is plausible from the paper's model and Stratified.agda, but not proved; check whether the paper already gives a shallow model in type theory.}
+
+\paragraph{Evidence for part 1.}
+$\lpr$'s levels map to universes, and each universe is a Kripke world. The
+stratified model in \texttt{Stratified.agda} is shallow, total by structural
+recursion, and keeps an explicit heap, for the image of call-by-need in
+$\lpr$.
+
+\paragraph{Evidence for part 2: the obstruction survives weakening.}
+One might hope constant factors leave room to avoid a single shared
+$D(g)$. They do not. Let
+\[
+  Q_0 = (\slam{h} h)\,(\slam{f} f\,0), \qquad
+  Q_{k+1} = (\slam{r} \slam{f} r + f\,0)\,(P\,Q_k).
+\]
+Forcing $g = Q_{k+1}$ once allocates one promise $r$ for $P\,Q_k$, shared by
+both calls of $g$'s function, so call-by-need runs $P\,Q_k$ in time linear
+in $k$. A translation that copies $g$'s cell, or re-evaluates its contents,
+per use runs $P\,Q_{k}$ twice at each level, in time $2^k$. So a
+cost-adequate translation must keep $g$'s contents as one shared semantic
+object, which is all \S\ref{sec:obstruction} needs.
+\todo{Check the $Q_k$ family carefully: types, that call-by-need is linear, and that per-use copying is exponential.}
+
+\paragraph{Toward a proof.}
+The positive part is a construction. The negative part needs care, because
+type theory can encode things: the syntactic model is itself a type-theoretic
+definition, with codes for thunks. The proof must use homomorphism to rule
+out codes, not positivity alone. One route: from cost adequacy at the $Q_k$
+family, extract a single type $D(g)$ that must appear negatively in the type
+of the heaps it reads, then show that no strictly positive, structurally
+recursive definition in $\mathcal{T}$ has that shape.
+
+\section{Discussion}
+
+\paragraph{Codes, as for System F.}
+Reynolds showed that System F has no model in which types denote
+sets~\cite{reynolds1984}. Its models interpret types as relations over
+untyped terms, that is, over codes. Promise heaps are similar: they have no
+shallow predicative model, and the model that works uses syntax. The
+difference is strength. System F's models quantify over all relations,
+which predicative type theory cannot do. The syntactic model of promises
+quantifies only over syntactic histories, and is a predicative definition.
+\todo{Check the Reynolds 1984 claim and the PER-model description.}
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  & naive shallow model & what works \\
+  \midrule
+  System F & none~\cite{reynolds1984} & PERs over untyped terms (impredicative) \\
+  promise heaps & none (conjecture) & relation over syntax (predicative) \\
+  \bottomrule
+\end{tabular}
+\end{center}
+So the impredicativity of promises is real, but small: it is tamed by
+syntax. Our slogan: \emph{safe impredicative state needs intensional codes,
+and $\lpr$'s levels mark the fragment that does not.}
+
+\paragraph{Typed expressiveness gaps.}
+Forster et al.\ found translations between effect constructs that exist
+untyped but fail once they must preserve types, because the target lacks a
+needed type~\cite{forster2017}. Ours has the same shape: an untyped
+store-passing translation of promises is easy, and the obstruction is that
+the heap type cannot be defined.
+\todo{Check the exact claim in Forster, Kammar, Lindley and Pretnar about typed vs untyped macro-expressibility.}
+
+\paragraph{The syntactic model.}
+The model that covers all of STLC uses worlds that are histories: sequences
+of stores in which each step is an allocation or a memoization, and a
+memoization is justified by a run of the cell's own thunk recorded earlier
+in the same world. Worlds contain no types, and the relation is defined by
+induction on types. Promises cost no level. A promise is good when its
+cell's contents are a good computation in every future. Acyclicity of the
+heap is a consequence of the fundamental lemma, not an assumption. Details
+are in \texttt{counterexample.tex}, \S8, and \texttt{Promises.agda}.
+
+\paragraph{Consistency is not the question.}
+Pure promises are consistent in type theory: Lean~4 implements memoizing
+thunks whose logical meaning is a function from $\Unit$. Call-by-need STLC
+is total~\cite{launchbury1993,ariola1995}. The obstruction is about the
+meta-level: whether the heap can be a semantic object in a total, shallow
+model. With an observable heap, Pédrot and Tabareau's fire
+triangle~\cite{pedrot2020} suggests further trouble for dependent
+elimination; with an unobservable heap, cost is the only reason to keep it.
+\todo{Check the Lean 4 Thunk claim, and the Launchbury / Ariola et al.\ citations for termination of call-by-need STLC.}
+\todo{Check the fire triangle statement: substitution, dependent elimination, observable effects.}
+
+\paragraph{Deallocation.}
+Neither model yet deallocates. Space adequacy needs reachability, so the
+next step is a collection step in worlds that removes cells unreachable from
+the live roots, including the continuation's environment.
+
+\begin{thebibliography}{99}
+\bibitem{ahmed2004} A.~Ahmed.
+  \emph{Semantics of Types for Mutable State}. PhD thesis, Princeton, 2004.
+\bibitem{ahmed2007} A.~Ahmed, M.~Fluet, G.~Morrisett.
+  $L^3$: A linear language with locations. \emph{Fundamenta Informaticae},
+  2007.
+\bibitem{ariola1995} Z.~Ariola, M.~Felleisen, J.~Maraist, M.~Odersky,
+  P.~Wadler. A call-by-need lambda calculus. POPL 1995.
+\bibitem{coquand1990} T.~Coquand, C.~Paulin-Mohring. Inductively defined
+  types. COLOG-88, LNCS 417, 1990.
+\bibitem{danielsson2008} N.~A.~Danielsson. Lightweight semiformal time
+  complexity analysis for purely functional data structures. POPL 2008.
+\bibitem{felleisen1991} M.~Felleisen. On the expressive power of
+  programming languages. \emph{Science of Computer Programming}, 1991.
+\bibitem{forster2017} Y.~Forster, O.~Kammar, S.~Lindley, M.~Pretnar. On
+  the expressive power of user-defined effects. ICFP 2017.
+\bibitem{gustavsson1999} J.~Gustavsson, D.~Sands. A foundation for
+  space-safe transformations of call-by-need programs. HOOTS 1999.
+\bibitem{gustavsson2001} J.~Gustavsson, D.~Sands. Possibilities and
+  limitations of call-by-need space improvement. ICFP 2001.
+\bibitem{hackett2019} J.~Hackett, G.~Hutton. Call-by-need is clairvoyant
+  call-by-value. ICFP 2019.
+\bibitem{kammar2017} O.~Kammar, P.~B.~Levy, S.~K.~Moss, S.~Staton. A monad
+  for full ground reference cells. LICS 2017.
+\bibitem{koronkevich2025} P.~Koronkevich, W.~J.~Bowman. Type universes as
+  Kripke worlds. ICFP 2025.
+\bibitem{launchbury1993} J.~Launchbury. A natural semantics for lazy
+  evaluation. POPL 1993.
+\bibitem{moran1999} A.~Moran, D.~Sands. Improvement in a lazy context: an
+  operational theory for call-by-need. POPL 1999.
+\bibitem{okasaki1998} C.~Okasaki. \emph{Purely Functional Data Structures}.
+  Cambridge University Press, 1998.
+\bibitem{paraskevopoulou2019} Z.~Paraskevopoulou, A.~W.~Appel. Closure
+  conversion is safe for space. ICFP 2019.
+\bibitem{pedrot2020} P.-M.~P\'edrot, N.~Tabareau. The fire triangle: how
+  to mix substitution, dependent elimination, and effects. POPL 2020.
+\bibitem{pottier2024} F.~Pottier, A.~Gu\'eneau, J.-H.~Jourdan, G.~M\'evel.
+  Thunks and debits in separation logic with time credits. POPL 2024.
+\bibitem{reynolds1984} J.~C.~Reynolds. Polymorphism is not set-theoretic.
+  Semantics of Data Types, LNCS 173, 1984.
+\bibitem{shao1994} Z.~Shao, A.~W.~Appel. Space-efficient closure
+  representations. LFP 1994.
+\end{thebibliography}
+\todo{All bibliography entries are from memory: check authors, titles, venues and years.}
+
+\end{document}
