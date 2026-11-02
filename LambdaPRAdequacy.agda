@@ -1090,3 +1090,33 @@ live-in-image : ∀ {i} {A : Ty i} (d : [] ⊢ A) →
 live-in-image {A = A} d =
   let (φ , rh , rv , ev , (hr , inj , _) , vr) = simulation d
   in φ , rh , rv , ev , inj , (λ a r → reach-img hr (↑≤ (fit d ≤-refl) ⌜ A ⌝) (λ i → i) vr r)
+
+-- An address is reachable from some value in a runtime environment.
+data ReachEnv (rh : RHeap) : ∀ {Γ} → REnv Γ → ℕ → Set where
+  re-hd : ∀ {x Γ v} {ρ : REnv Γ} {a} → Reach rh v a → ReachEnv rh {x ∷ Γ} (v ∷ ρ) a
+  re-tl : ∀ {x Γ v} {ρ : REnv Γ} {a} → ReachEnv rh ρ a → ReachEnv rh {x ∷ Γ} (v ∷ ρ) a
+
+env-reach-img : ∀ {N Γ} {W : World N} {φ h rh} {ρ : Env N Γ W} {ρR : REnv Γ} →
+                HRel N W φ h rh → EnvRel W φ ρ ρR → ∀ {a} → ReachEnv rh ρR a → InImg W φ a
+env-reach-img {Γ = (i , A) ∷ Γ} {ρ = (q , v) ∷ ρ} {_ ∷ _} hr (vr , er) (re-hd r) =
+  reach-img hr (↑≤ q ⌜ A ⌝) (λ i → i) vr r
+env-reach-img {ρ = _ ∷ _} {_ ∷ _} hr (_ , er) (re-tl r) = env-reach-img hr er r
+
+-- Heap adequacy at every boundary of evaluation.  Run a subterm d in a
+-- related environment from a related heap.  Then the semantic heap
+-- afterwards maps injectively into the runtime heap with related contents,
+-- and every runtime cell still live, from the subterm's environment or its
+-- result, is the image of a semantic cell.
+boundary : ∀ {Γ i} {A : Ty i} (d : Γ ⊢ A) {N} (b : lvl d ≤ N) {W : World N} (φ : Map)
+             (ρ : Env N Γ W) (ρR : REnv Γ) → EnvRel W φ ρ ρR →
+           ∀ h rh → Inv N W φ h rh →
+           let (W' , q , h' , v) = ⟦ d ⟧ b ρ h in
+           Σ[ φ' ∈ Map ] Σ[ rh' ∈ RHeap ] Σ[ rv ∈ RVal ]
+             Eval rh ρR d rh' rv × Inj W' φ' ×
+             (∀ a → ReachEnv rh' ρR a ⊎ Reach rh' rv a → InImg W' φ' a)
+boundary {A = A} d b φ ρ ρR er h rh inv =
+  let (φ' , rh' , rv , ev , e , (hr , inj , _) , vr , _) = run (fundamental d b φ ρ ρR er) h rh inv
+      q = proj₁ (proj₂ (⟦ d ⟧ b ρ h))
+  in φ' , rh' , rv , ev , inj ,
+     λ { a (inl r) → env-reach-img hr (EnvRel-mono q e er) r
+       ; a (inr r) → reach-img hr (↑≤ (fit d b) ⌜ A ⌝) (λ i → i) vr r }

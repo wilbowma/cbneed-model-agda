@@ -62,9 +62,12 @@
   g\,(\slam{m} m))$, defeats every well-founded stratification of it. We
   make the claim precise as a failure of \emph{intensional
   macro-expressibility}: Felleisen's homomorphic translations, required to
-  preserve types and to preserve time and space up to constant factors.
-  Under that definition, $\lpr$'s universe levels are exactly the price of
-  embedding stateful programs in type theory, and the level-free promise
+  preserve types and to preserve the heap. Target cells must correspond one
+  to one with live source cells, with related contents. Heap adequacy is how
+  the definition sees \emph{sharing}: a translation that recomputes instead
+  of sharing needs either a missing cell or two cells where the source has
+  one. Under that definition, $\lpr$'s universe levels are exactly the price
+  of embedding stateful programs in type theory, and the level-free promise
   calculus is more expressive than predicative type theory.
 \end{abstract}
 
@@ -93,9 +96,10 @@ This note asks what that gap means. Our answers:
     with the heap's type playing the semantic world (\S\ref{sec:circ}).
   \item $P$ defeats every well-founded measure on that circularity, not just
     universe levels (\S\ref{sec:obstruction}).
-  \item The gap is invisible to observational notions of expressiveness, but
-    a cost-sensitive variant of Felleisen's macro-expressibility captures it
-    (\S\ref{sec:cost}, \S\ref{sec:def}).
+  \item The gap is invisible to observational notions of expressiveness. A
+    heap-sensitive variant of Felleisen's macro-expressibility captures it.
+    The feature it isolates is sharing, which is what makes call-by-need
+    cheaper than call-by-name (\S\ref{sec:cost}, \S\ref{sec:def}).
   \item Under that notion we conjecture that $\lpr$ is expressible in
     predicative type theory and call-by-need STLC is not
     (\S\ref{sec:conj}). The dividing line is Felleisen's homomorphism
@@ -341,6 +345,16 @@ same complexity. These differ:
 Only a heap gives all three. We take this as the justification for asking a
 translation to keep the heap.
 
+\paragraph{Sharing is the feature; time is the consequence.}
+Both counterexamples above are failures of sharing. Call-by-name has no cell
+for an argument, so it recomputes the argument at every use. A translation
+that copies a cell per use has two cells where the source has one. In both
+cases the extra time follows from the wrong heap. So rather than bound time
+directly, we ask the translation to preserve the heap. The time savings of
+call-by-need, never computing anything twice, then follow from sharing
+rather than being a separate condition. This also makes the condition
+checkable by a simulation proof, without a cost model for the target.
+
 \section{Intensional macro-expressibility}
 \label{sec:def}
 
@@ -363,9 +377,8 @@ Neither sees the intensional gap. We keep the homomorphism condition and
 change what must be preserved.
 
 \begin{definition}[Intensional macro-expressibility]
-  Fix a target type theory $\mathcal{T}$ with a cost model, such as
-  call-by-value evaluation. A source language $L$ with a heap is
-  \emph{intensionally macro-expressible} in $\mathcal{T}$ if there is a
+  A source language $L$ with a heap is \emph{intensionally
+  macro-expressible} in a type theory $\mathcal{T}$ if there is a
   translation $\varphi$ that is
   \begin{enumerate}
     \item \emph{typed}: source types map to $\mathcal{T}$ types, and
@@ -374,33 +387,54 @@ change what must be preserved.
       $\mathcal{T}$-context applied to the translations of its immediate
       subterms, never to their syntax. Pure constructs may change, so
       store-passing translations are allowed;
-    \item \emph{cost-adequate}: for every closed program, $\varphi(e)$ yields
-      the same result, and its time and maximum live space under the cost
-      model of $\mathcal{T}$ are within constant factors of those of $e$.
+    \item \emph{heap-adequate}: whenever a subterm is evaluated, in a
+      related environment and from related heaps, the source run and the
+      target computation agree in the following sense.
+      \begin{itemize}
+        \item They produce related results.
+        \item There is an injective map from target cells to source cells,
+          under which every cell's contents are related. In particular, a
+          cell holding a memoized value corresponds to a cell holding a
+          memoized value, not a pending computation.
+        \item Every source cell that is still live, from the subterm's
+          environment or its result, is the image of a target cell.
+      \end{itemize}
   \end{enumerate}
 \end{definition}
 
+Heap adequacy is checked at every boundary of evaluation, not only at the
+end. A closed program of type $\Nat$ ends with no live cells, so a condition
+on the final heap alone would say nothing about how it got there.
+
+\begin{remark}[Heap adequacy sees sharing]
+  Call-by-name thunks fail the last condition: the source has a live cell
+  for an argument, and the target has none. A translation that copies a cell
+  per use fails injectivity, because two target cells map to the one source
+  cell. Alternatively it keeps one cell but never memoizes it, and fails the
+  contents condition. Either way, recomputation shows up in the heap before
+  it shows up in time.
+\end{remark}
+
 \begin{remark}[Homomorphism excludes codes]
-  The syntactic model satisfies typing and cost adequacy, and its
-  fundamental lemma is compositional on typing derivations. But the case for
-  $\prom{e}$ stores the closure $\mathit{thunk}\;e\;\rho$, the syntax of $e$,
-  rather than the denotation of $e$. It is homomorphic only in a target with
-  quotation. The line between a shallow model and syntax in the heap is
-  exactly Felleisen's homomorphism condition.
+  The syntactic model is typed and heap-adequate, and its fundamental lemma
+  is compositional on typing derivations. But the case for $\prom{e}$ stores
+  the closure $\mathit{thunk}\;e\;\rho$, the syntax of $e$, rather than the
+  denotation of $e$. It is homomorphic only in a target with quotation. The
+  line between a shallow model and syntax in the heap is exactly Felleisen's
+  homomorphism condition.
 \end{remark}
 
-\begin{remark}[The cost model must be fixed]
-  Type theory has no evaluation strategy of its own. Without a fixed cost
-  model, $\prom{e} \mapsto e$ compiled through a lazy host such as GHC is
-  cost-adequate by accident of the implementation. Fixing call-by-value
-  makes sharing visible in the translation.
+\begin{remark}[No cost model needed]
+  An earlier version of this definition bounded time and live space up to
+  constant factors, under a fixed call-by-value cost model for the target.
+  That needs a cost model for type theory, which has no evaluation strategy
+  of its own. It also cannot be stated inside the type theory, because
+  evaluation cost is not observable there. Heap adequacy avoids both
+  problems. It gives up the freedom of constant factors, such as passing
+  values unboxed instead of allocating cells for them. For a separation
+  result, that is a fair trade.
 \end{remark}
-
-\begin{remark}[Why not exact heap adequacy]
-  A one-to-one correspondence of cells would also do, and the stratified
-  model satisfies it. Constant factors are weaker, allow optimizations such
-  as passing values unboxed, and match improvement theory.
-\end{remark}
+\todo{Review the switch from cost adequacy to heap adequacy, and whether the third condition is stated at the right strength.}
 
 \section{The conjecture}
 \label{sec:conj}
@@ -408,8 +442,7 @@ change what must be preserved.
 \begin{conjecture}
   Let $\mathcal{T}$ be a predicative type theory: Martin-L\"of type theory
   with a cumulative hierarchy of universes and strictly positive inductive
-  families, whose definitions are structurally recursive, with
-  call-by-value cost.
+  families, whose definitions are structurally recursive.
   \begin{enumerate}
     \item $\lpr$ is intensionally macro-expressible in $\mathcal{T}$.
     \item Call-by-need STLC is not.
@@ -417,8 +450,9 @@ change what must be preserved.
 \end{conjecture}
 \todo{Check whether the paper already gives a shallow model in type theory.}
 
-\paragraph{Part 1, mechanized.}
-Most of part~1 is now proved in Agda, with the free-variable $\lambda$ rule.
+\paragraph{Part 1 is proved.}
+Part~1 holds, with the free-variable $\lambda$ rule, and is mechanized in
+Agda. Agda's type theory is an instance of $\mathcal{T}$.
 
 \begin{theorem}[Shallow model and simulation]
   \leavevmode
@@ -440,19 +474,26 @@ Most of part~1 is now proved in Agda, with the free-variable $\lambda$ rule.
       operationally to exactly the number the model computes
       (\texttt{adequacy}), and every closed, well-typed program terminates
       (\texttt{termination}).
-    \item (\texttt{live-in-image}) For a closed program, every runtime cell
-      reachable from the result, directly or through closure environments and
-      the heap, is the image of a semantic cell. With injectivity of the map,
-      the live runtime heap is no larger than the final semantic heap, and the
-      semantic heap is no larger than the runtime heap.
+    \item (\texttt{boundary}) Heap adequacy holds at every boundary of
+      evaluation. Run any subterm in a related environment from related
+      heaps. Afterwards, the semantic heap maps injectively into the runtime
+      heap with related contents. Every runtime cell still live, from the
+      subterm's environment or its result, is the image of a semantic cell.
+      Reachability goes directly, through closure environments, and through
+      the heap.
   \end{enumerate}
 \end{theorem}
 
-Part~4 is stated for the final configuration, where the result is the only
-root. A statement for every intermediate configuration would also count
-the continuation's environment as roots. Time is not yet proved; see
-\S\ref{sec:design}.
-\todo{Is the final-configuration space statement enough, or do we want maximum live space over the whole run?}
+The translation is typed and homomorphic by part~1, and heap-adequate by
+parts~2 and~4, so $\lpr$ is intensionally macro-expressible in Agda's type
+theory. For a closed program, part~4 specializes to
+\texttt{live-in-image}: the live runtime heap is no larger than the final
+semantic heap, and the semantic heap is no larger than the runtime heap.
+
+Part~4 needed one change to the value relation. The relation for functions
+is behavioural, so it said nothing about what a closure captures. A related
+closure must now also have every address in its environment be a cell of its
+world.
 
 \paragraph{Regions for free.}
 In the model, a function at level $k$ runs its body with fresh, empty heap
@@ -468,7 +509,7 @@ theorem shows they are garbage: no live runtime cell lies outside the map.
 
 \subsection{Design decisions}
 \label{sec:design}
-\todo{Review these design decisions, especially the plan for time.}
+\todo{Review these design decisions.}
 
 \paragraph{Semantic heap, syntactic operational semantics.}
 The model keeps semantic values in the heap. That is the point of the
@@ -515,30 +556,34 @@ Two choices exist only to help Agda's inference:
     the simulation proof free of transport.
 \end{itemize}
 
-\paragraph{Time: why the current model is not cost-preserving.}
-Two separate problems stand between the current development and a time
-bound.
-\begin{itemize}
-  \item \emph{It cannot be stated internally.} The definition asks that
-    running the translation under the target's cost model cost within a
-    constant factor of the source. The semantics consists of Agda functions,
-    and Agda's evaluation cost is not observable inside Agda. The internal
-    alternative is to instrument the semantics with a step counter and prove
-    it equals the operational step count. Because the translation is
-    homomorphic, that is close to true by construction.
-  \item \emph{The current representation would fail it.} Under call-by-value
-    evaluation, worlds and Kripke proofs are ordinary run-time data in
-    \texttt{LambdaPR.agda}. Composing world extensions does work
-    proportional to the number of cells allocated. Weakening a reference
-    recomputes its position. Most importantly, running a lower-level
-    computation (\texttt{embed1}) weakens every cell in the upper layers, so a
-    single call can cost time proportional to the heap. Overheads
-    proportional to the program's level $N$ (casts and level conversions)
-    are harmless, since $N$ is fixed per program. Overheads proportional to
-    the heap are not.
-\end{itemize}
+\paragraph{Heap adequacy rather than time.}
+The definition asks for heap adequacy, not a time bound (see the remarks
+in \S\ref{sec:def}). Sharing is the feature that separates call-by-need from
+call-by-name, and heap adequacy states it directly. A time bound states only
+its consequence, and needs a cost model for the target that type theory does
+not have. A time bound also cannot be stated inside the type theory, because
+evaluation cost is not observable there. The internal substitute, a step
+counter proved equal to the operational step count, is close to true by
+construction for a homomorphic translation, so it would add little.
 
-\paragraph{Time: the planned representation.}
+\paragraph{Remark: the shallow model's run-time cost.}
+Separately from the definition, it is worth recording that the current
+model would not run within a constant factor of $\lpr$ under call-by-value
+evaluation. Worlds and Kripke proofs are ordinary run-time data in
+\texttt{LambdaPR.agda}:
+\begin{itemize}
+  \item Composing world extensions does work proportional to the number of
+    cells allocated.
+  \item Weakening a reference recomputes its position.
+  \item Most importantly, running a lower-level computation
+    (\texttt{embed1}) weakens every cell in the upper layers, so a single
+    call can cost time proportional to the heap.
+\end{itemize}
+Overheads proportional to the program's level $N$, such as casts and level
+conversions, are harmless, since $N$ is fixed per program. Overheads
+proportional to the heap are not. Kripke monotonicity has a run-time cost in
+a shallow embedding, unless worlds are erased.
+
 \texttt{ErasureProbe.agda} checks, in Agda~2.7 with \texttt{--erasure}, the
 pieces of a representation in which each semantic operation does constant
 work besides its subcalls, up to the level $N$ and list traversal for heap
@@ -557,16 +602,16 @@ lookup.
   \item Reading a cell walks the layer using run-time numbers, and fixes up
     the cell's type with an erased proof.
 \end{itemize}
-What remains is to port \texttt{LambdaPR.agda} and its simulation proof to
-this representation. That changes the value relation for references and the
-heap invariant, which most of the 1100-line proof depends on. It also
-remains to add the step counter and prove it equal to the operational step
-count, with a paper argument that each case does constant work.
-\todo{Decide whether the internal step-count theorem plus a paper argument about the erased representation is an acceptable form for the time half.}
+Porting \texttt{LambdaPR.agda} and its simulation proof to this
+representation would change the value relation for references and the heap
+invariant, which most of the proof depends on. Since the definition no longer
+asks for a time bound, the port is optional.
+\todo{Decide whether the erased representation is worth porting, as engineering, now that time is not part of the definition.}
 
-\paragraph{Evidence for part 2: the obstruction survives weakening.}
-One might hope constant factors leave room to avoid a single shared
-$D(g)$. They do not. Let
+\paragraph{Evidence for part 2: sharing forces a single $D(g)$.}
+Heap adequacy forbids a translation from copying $g$'s cell or recomputing
+its contents. The following family shows that this is not a technicality:
+recomputation would be exponentially more expensive. Let
 \[
   Q_0 = (\slam{h} h)\,(\slam{f} f\,0), \qquad
   Q_{k+1} = (\slam{r} \slam{f} r + f\,0)\,(P\,Q_k).
@@ -574,19 +619,21 @@ $D(g)$. They do not. Let
 Forcing $g = Q_{k+1}$ once allocates one promise $r$ for $P\,Q_k$, shared by
 both calls of $g$'s function, so call-by-need runs $P\,Q_k$ in time linear
 in $k$. A translation that copies $g$'s cell, or re-evaluates its contents,
-per use runs $P\,Q_{k}$ twice at each level, in time $2^k$. So a
-cost-adequate translation must keep $g$'s contents as one shared semantic
-object, which is all \S\ref{sec:obstruction} needs.
+per use runs $P\,Q_{k}$ twice at each level, in time $2^k$. A heap-adequate
+translation must keep $g$'s contents as one shared semantic object, a single
+target cell for the single source cell. That is all \S\ref{sec:obstruction}
+needs.
 \todo{Check the $Q_k$ family carefully: types, that call-by-need is linear, and that per-use copying is exponential.}
 
 \paragraph{Toward a proof.}
 The positive part is a construction. The negative part needs care, because
 type theory can encode things: the syntactic model is itself a type-theoretic
 definition, with codes for thunks. The proof must use homomorphism to rule
-out codes, not positivity alone. One route: from cost adequacy at the $Q_k$
-family, extract a single type $D(g)$ that must appear negatively in the type
-of the heaps it reads, then show that no strictly positive, structurally
-recursive definition in $\mathcal{T}$ has that shape.
+out codes, not positivity alone. One route: from heap adequacy at $P$,
+extract a single type $D(g)$ for the contents of $g$'s cell. That type must
+appear negatively in the type of the heaps it reads. Then show that no
+strictly positive, structurally recursive definition in $\mathcal{T}$ has
+that shape.
 
 \section{Discussion}
 
