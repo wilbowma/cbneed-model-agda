@@ -11,6 +11,7 @@
 \newtheorem{definition}{Definition}
 \newtheorem{conjecture}{Conjecture}
 \newtheorem{lemma}{Lemma}
+\newtheorem{theorem}{Theorem}
 \theoremstyle{remark}
 \newtheorem*{remark}{Remark}
 
@@ -113,11 +114,24 @@ detail; \texttt{Stratified.agda} is the stratified shallow model; and
 $\lpr$ is a call-by-value calculus with higher-order references and a
 hierarchy of universes~\cite{koronkevich2025}. A reference costs a level:
 $\tRef \tau :: \Type{i+1}$ when $\tau :: \Type{i}$. A function type carries a
-level, $\tau_1 \arr{k} \tau_2$, and a $\lambda$ at level $k$ requires
-$k \geq \max(\mathit{levels}(\mathit{FV}(e)), \tau_1, \tau_2)$, a non-strict
-bound, because functions are immutable. Each universe is a Kripke world: a
-world at level $k+1$ maps locations to semantic types at levels $\le k$,
-which breaks the type-world circularity.
+level, $\tau_1 \arr{k} \tau_2$, and a $\lambda$ at level $k$ requires $k$
+to bound the levels of $\tau_1$, $\tau_2$ and the context. The bound is
+non-strict, because functions are immutable. Each universe is a Kripke
+world: a world at level $k+1$ maps locations to semantic types at levels
+$\le k$, which breaks the type-world circularity.
+
+\paragraph{The $\lambda$ rule.}
+The paper's main typing rule (its Fig.~3) bounds the whole context,
+$k \geq \max(\Gamma, \tau_1, \tau_2)$. Its \S3.1 gives a variant that bounds
+only the free variables, $k \geq \max(\mathit{FV}(e), \tau_1, \tau_2)$, which
+also restores weakening and substitution. We use the free-variable rule
+throughout. It is the more realistic choice for an implementation, and it
+matters in practice. With the whole-context rule, a closed function written
+inside the scope of a reference, such as $\lambda x. 7$ under
+$r : \tRef (\Nat \arr{0} \Nat)$, is forced to level~$1$ and cannot be stored
+in $r$. In the mechanization, the body of a $\lambda$ is typed in a
+sub-context $\Delta \subseteq \Gamma$ given by a thinning, and $k$ bounds
+$\Delta$. Choosing $\Delta = \mathit{FV}(e)$ gives the free-variable rule.
 \todo{Check the statement of the free-variable $\lambda$ rule against \S3.1 of the paper.}
 
 \subsection{Call-by-need as promises}
@@ -401,13 +415,55 @@ change what must be preserved.
     \item Call-by-need STLC is not.
   \end{enumerate}
 \end{conjecture}
-\todo{This is a conjecture. Part 1 is plausible from the paper's model and Stratified.agda, but not proved; check whether the paper already gives a shallow model in type theory.}
+\todo{Check whether the paper already gives a shallow model in type theory.}
 
-\paragraph{Evidence for part 1.}
-$\lpr$'s levels map to universes, and each universe is a Kripke world. The
-stratified model in \texttt{Stratified.agda} is shallow, total by structural
-recursion, and keeps an explicit heap, for the image of call-by-need in
-$\lpr$.
+\paragraph{Part 1, mechanized.}
+Most of part~1 is now proved in Agda, with the free-variable $\lambda$ rule.
+
+\begin{theorem}[Shallow model and simulation]
+  \leavevmode
+  \begin{enumerate}
+    \item (\texttt{LambdaPR.agda}) There is a translation of $\lpr$ typing
+      derivations into Agda that is typed and homomorphic. Each type denotes
+      an Agda type indexed by a stratified world. Each term denotes a
+      store-passing Agda function over an explicit heap of semantic values,
+      in which $\new$, $\deref$ and $\assign$ are cell allocation, lookup and
+      update. Every definition lives in $\mathsf{Set}$ and is accepted by
+      structural recursion, without postulates or fuel.
+    \item (\texttt{LambdaPRAdequacy.agda}) Every semantic computation is
+      simulated by $\lpr$'s operational semantics, with one flat heap and
+      fresh locations as in the paper's Fig.~5. The run produces a related
+      result. There is an injective map from semantic cells to runtime cells
+      under which every cell's contents are related. Runtime cells outside the
+      map's image are left untouched.
+    \item Consequently, a closed program of type $\Nat$ evaluates
+      operationally to exactly the number the model computes
+      (\texttt{adequacy}), and every closed, well-typed program terminates
+      (\texttt{termination}).
+  \end{enumerate}
+\end{theorem}
+
+What remains of cost adequacy:
+\begin{itemize}
+  \item \emph{Time.} Each semantic operation corresponds to one operational
+    rule, but the mechanization does not count steps.
+  \item \emph{Space.} The injective map shows that the semantic heap is never
+    larger than the runtime heap. The converse is not proved: that every
+    runtime cell outside the map is unreachable.
+\end{itemize}
+\todo{Decide whether to state cost adequacy as a theorem with step counts, or leave time informal.}
+
+\paragraph{Regions for free.}
+In the model, a function at level $k$ runs its body with fresh, empty heap
+layers for levels $\geq k$, and drops them when it returns. This is sound:
+nothing of level $\leq k$, neither the result, nor the captured variables,
+nor anything stored below level $k$, can point into those layers. So the
+universe hierarchy induces region-based deallocation. The tests in
+\texttt{LambdaPRTests.agda} show it: allocating a reference inside a
+level-$0$ function leaves no cell in the final semantic heap, while the same
+allocation at top level leaves one. The simulation relates these freed cells
+to runtime cells that the operational semantics never frees, which is why
+only one direction of space adequacy is proved.
 
 \paragraph{Evidence for part 2: the obstruction survives weakening.}
 One might hope constant factors leave room to avoid a single shared
