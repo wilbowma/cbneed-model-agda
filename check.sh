@@ -12,7 +12,7 @@ MEM=${AGDA_MEM:-4G}
 LIMIT=${AGDA_TIMEOUT:-600}
 
 if [ $# -eq 0 ]; then
-  set -- Stratified.agda Promises.agda LambdaPR.agda LambdaPRTests.agda \
+  set -- Stratified.agda Promises.agda LambdaPR.agda LambdaPRTests.agda ErasureProbe.agda \
          LambdaPRAdequacy.agda
 fi
 

@@ -440,18 +440,19 @@ Most of part~1 is now proved in Agda, with the free-variable $\lambda$ rule.
       operationally to exactly the number the model computes
       (\texttt{adequacy}), and every closed, well-typed program terminates
       (\texttt{termination}).
+    \item (\texttt{live-in-image}) For a closed program, every runtime cell
+      reachable from the result, directly or through closure environments and
+      the heap, is the image of a semantic cell. With injectivity of the map,
+      the live runtime heap is no larger than the final semantic heap, and the
+      semantic heap is no larger than the runtime heap.
   \end{enumerate}
 \end{theorem}
 
-What remains of cost adequacy:
-\begin{itemize}
-  \item \emph{Time.} Each semantic operation corresponds to one operational
-    rule, but the mechanization does not count steps.
-  \item \emph{Space.} The injective map shows that the semantic heap is never
-    larger than the runtime heap. The converse is not proved: that every
-    runtime cell outside the map is unreachable.
-\end{itemize}
-\todo{Decide whether to state cost adequacy as a theorem with step counts, or leave time informal.}
+Part~4 is stated for the final configuration, where the result is the only
+root. A statement for every intermediate configuration would also count
+the continuation's environment as roots. Time is not yet proved; see
+\S\ref{sec:design}.
+\todo{Is the final-configuration space statement enough, or do we want maximum live space over the whole run?}
 
 \paragraph{Regions for free.}
 In the model, a function at level $k$ runs its body with fresh, empty heap
@@ -462,8 +463,106 @@ universe hierarchy induces region-based deallocation. The tests in
 \texttt{LambdaPRTests.agda} show it: allocating a reference inside a
 level-$0$ function leaves no cell in the final semantic heap, while the same
 allocation at top level leaves one. The simulation relates these freed cells
-to runtime cells that the operational semantics never frees, which is why
-only one direction of space adequacy is proved.
+to runtime cells that the operational semantics never frees. Part~4 of the
+theorem shows they are garbage: no live runtime cell lies outside the map.
+
+\subsection{Design decisions}
+\label{sec:design}
+\todo{Review these design decisions, especially the plan for time.}
+
+\paragraph{Semantic heap, syntactic operational semantics.}
+The model keeps semantic values in the heap. That is the point of the
+exercise, and it is possible for $\lpr$ because levels stratify the heap. The
+operational semantics, as in the paper, has one flat heap of syntactic values
+with fresh locations. The simulation relates the two through a map from
+semantic cells to runtime addresses.
+
+\paragraph{Cells named by key.}
+A semantic cell is named by its layer and its position counted from the
+oldest cell in that layer. Positions counted from the newest cell shift every
+time a cell is allocated, so the map would have to be updated on every
+allocation. Keys never change, so the map is a plain function on keys, and
+lowering a world needs no change of map.
+
+\paragraph{The free-variable $\lambda$ rule.}
+Described in \S2. With a thinning in the syntax, the semantics of $\lambda$
+restricts the environment to the variables the body may use, so a
+function's level reflects only what it captures.
+
+\paragraph{Fresh layers for function bodies.}
+A function at level $k$ only receives a heap of $k$ layers, but its body may
+allocate at higher levels. The body therefore runs with fresh, empty upper
+layers, which are dropped when it returns. This is what makes the
+semantic domain definable at level $k$, and it yields the region discipline
+above.
+
+\paragraph{Behavioural relation for functions, plus what they capture.}
+The relation for a function is behavioural: related arguments give related
+runs. For space this is not enough, because it says nothing about the
+locations a closure captures. The relation therefore also requires every
+address in a closure's environment to be the address of a cell of the
+function's world. This is the only change the space theorem needed.
+
+\paragraph{Proof engineering.}
+Two choices exist only to help Agda's inference:
+\begin{itemize}
+  \item The simulation is a function type, because it occurs inside the
+    definition of the value relation. A record version would fail Agda's
+    positivity check, because of the heap invariant. The proofs therefore
+    use a record wrapper defined outside the mutual block.
+  \item Conversions between levels are defined by recursion on the
+    level proof rather than by rewriting along world equalities. That keeps
+    the simulation proof free of transport.
+\end{itemize}
+
+\paragraph{Time: why the current model is not cost-preserving.}
+Two separate problems stand between the current development and a time
+bound.
+\begin{itemize}
+  \item \emph{It cannot be stated internally.} The definition asks that
+    running the translation under the target's cost model cost within a
+    constant factor of the source. The semantics consists of Agda functions,
+    and Agda's evaluation cost is not observable inside Agda. The internal
+    alternative is to instrument the semantics with a step counter and prove
+    it equals the operational step count. Because the translation is
+    homomorphic, that is close to true by construction.
+  \item \emph{The current representation would fail it.} Under call-by-value
+    evaluation, worlds and Kripke proofs are ordinary run-time data in
+    \texttt{LambdaPR.agda}. Composing world extensions does work
+    proportional to the number of cells allocated. Weakening a reference
+    recomputes its position. Most importantly, running a lower-level
+    computation (\texttt{embed1}) weakens every cell in the upper layers, so a
+    single call can cost time proportional to the heap. Overheads
+    proportional to the program's level $N$ (casts and level conversions)
+    are harmless, since $N$ is fixed per program. Overheads proportional to
+    the heap are not.
+\end{itemize}
+
+\paragraph{Time: the planned representation.}
+\texttt{ErasureProbe.agda} checks, in Agda~2.7 with \texttt{--erasure}, the
+pieces of a representation in which each semantic operation does constant
+work besides its subcalls, up to the level $N$ and list traversal for heap
+lookup. List traversal costs the same as the operational semantics' heap
+lookup.
+\begin{itemize}
+  \item Worlds and Kripke proofs are erased, so they cost nothing at run
+    time.
+  \item A reference is an index counted from the oldest cell of its layer,
+    with an erased validity proof. Weakening it is then free, because the
+    index does not change.
+  \item Each heap layer records, in erased form, the world its cells were
+    typed in, and a run-time count of its cells. Cells are weakened lazily,
+    when read, so running a lower-level computation no longer touches the
+    upper layers.
+  \item Reading a cell walks the layer using run-time numbers, and fixes up
+    the cell's type with an erased proof.
+\end{itemize}
+What remains is to port \texttt{LambdaPR.agda} and its simulation proof to
+this representation. That changes the value relation for references and the
+heap invariant, which most of the 1100-line proof depends on. It also
+remains to add the step counter and prove it equal to the operational step
+count, with a paper argument that each case does constant work.
+\todo{Decide whether the internal step-count theorem plus a paper argument about the erased representation is an acceptable form for the time half.}
 
 \paragraph{Evidence for part 2: the obstruction survives weakening.}
 One might hope constant factors leave room to avoid a single shared

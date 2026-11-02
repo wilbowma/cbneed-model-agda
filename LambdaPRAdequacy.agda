@@ -244,20 +244,63 @@ Ext-below : ∀ {k} {W : World k} {L φ φ'} → Ext (W , L) φ φ' → Ext W φ
 Ext-below e = mkExt λ l → at e (below l)
 
 ------------------------------------------------------------------------
+-- Addresses in runtime values
+------------------------------------------------------------------------
+
+-- An address occurs in a runtime value: directly, or in a closure's
+-- environment.
+mutual
+  data Occ : RVal → ℕ → Set where
+    o-loc : ∀ {a} → Occ (loc a) a
+    o-clo : ∀ {Δ i j} {A : Ty i} {B : Ty j} {body : (i , A) ∷ Δ ⊢ B}
+              {ρ : REnv Δ} {a} → OccEnv ρ a → Occ (clo body ρ) a
+
+  data OccEnv : ∀ {Δ} → REnv Δ → ℕ → Set where
+    o-hd : ∀ {x Δ v} {ρ : REnv Δ} {a} → Occ v a → OccEnv {x ∷ Δ} (v ∷ ρ) a
+    o-tl : ∀ {x Δ v} {ρ : REnv Δ} {a} → OccEnv ρ a → OccEnv {x ∷ Δ} (v ∷ ρ) a
+
+-- An address is reachable from a value through the runtime heap.
+data Reach (rh : RHeap) : RVal → ℕ → Set where
+  r-occ  : ∀ {rv a} → Occ rv a → Reach rh rv a
+  r-step : ∀ {rv b v a} → Occ rv b → rh ! b ≡ just v → Reach rh v a → Reach rh rv a
+
+-- An address is the address of a cell of W.
+InImg : ∀ {k} → World k → Map → ℕ → Set
+InImg W φ a = Σ[ j ∈ ℕ ] Σ[ A ∈ STy j ] Σ[ l ∈ Loc W j A ] φ (key l) ≡ a
+
+InImg-mono : ∀ {k} {W W' : World k} {φ φ' a} (q : W ≤W W') →
+             Ext W φ φ' → InImg W φ a → InImg W' φ' a
+InImg-mono {φ' = φ'} q e (j , A , l , eq) =
+  j , A , mono-Loc q l , trans (cong φ' (key-mono q l)) (trans (at e l) eq)
+
+InImg-resp : ∀ {k} {W : World k} {φ φ₂ a} → Ext W φ φ₂ → InImg W φ a → InImg W φ₂ a
+InImg-resp e (j , A , l , eq) = j , A , l , trans (at e l) eq
+
+InImg-below : ∀ {k} {W : World k} {L φ a} → InImg W φ a → InImg (W , L) φ a
+InImg-below (j , A , l , eq) = j , A , below l , eq
+
+InImg-lower : ∀ {m k} (q : m ≤′ k) {W : World k} {φ a} →
+              InImg (lowerW q W) φ a → InImg W φ a
+InImg-lower ≤′-refl     i = i
+InImg-lower (≤′-step q) {W , L} {φ} i = InImg-below {L = L} {φ = φ} (InImg-lower q {φ = φ} i)
+
+------------------------------------------------------------------------
 -- The simulation relation
 ------------------------------------------------------------------------
 
 mutual
-  -- Semantic and runtime values
+  -- Semantic and runtime values.  A related closure's environment holds
+  -- only addresses of cells of W: what a function captures is in its world.
   V-rel : (k : ℕ) (X : STy k) (W : World k) → Map → Val k X W → RVal → Set
   V-rel _       nat       _       φ n  rv = rv ≡ num n
   V-rel _       unit      _       φ _  rv = rv ≡ unit
   V-rel (suc k) (↑ X)     (W , L) φ v  rv = V-rel k X W φ v rv
   V-rel (suc k) (ref X)   (W , L) φ x  rv = rv ≡ loc (φ (k , fromEnd x))
   V-rel k       (arr X Y) W       φ f  (clo body ρ) =
-    ∀ (W' : World k) (q : W ≤W W') (φ' : Map) → Ext W φ φ' →
-    ∀ a ra → V-rel k X W' φ' a ra →
-    SimC k Y W' φ' (f W' q a) (λ rh rh' rv → Eval rh (ra ∷ ρ) body rh' rv)
+    (∀ a → OccEnv ρ a → InImg W φ a) ×
+    (∀ (W' : World k) (q : W ≤W W') (φ' : Map) → Ext W φ φ' →
+     ∀ a ra → V-rel k X W' φ' a ra →
+     SimC k Y W' φ' (f W' q a) (λ rh rh' rv → Eval rh (ra ∷ ρ) body rh' rv))
   V-rel k       (arr X Y) W       φ f  _ = ⊥
 
   -- Every semantic cell has a runtime cell holding a related value
@@ -295,7 +338,8 @@ V-rel-resp nat       e r = r
 V-rel-resp unit      e r = r
 V-rel-resp (↑ X)     {W , L} e r = V-rel-resp X (Ext-below e) r
 V-rel-resp (ref X)   {W , L} {v = x} e r = trans r (cong loc (sym (at e (top x))))
-V-rel-resp (arr X Y) {rv = clo body ρ} e r =
+V-rel-resp (arr X Y) {rv = clo body ρ} e (img , r) =
+  (λ a o → InImg-resp e (img a o)) ,
   λ W' q φ' e' a ra ar → r W' q φ' (mkExt λ l → trans (at e' l) (at e l)) a ra ar
 V-rel-resp (arr X Y) {rv = num _}  e ()
 V-rel-resp (arr X Y) {rv = unit}   e ()
@@ -309,7 +353,8 @@ V-rel-mono (↑ X)     {W , L} {W' , L'} (q , _) e r = V-rel-mono X q (Ext-below
 V-rel-mono (ref X)   {W , L} {W' , L'} {φ} {φ'} {x} (q , qL) e r =
   trans r (cong loc (trans (sym (at e (top x)))
                            (cong (λ n → φ' (_ , n)) (sym (fromEnd-wk qL x)))))
-V-rel-mono (arr X Y) {rv = clo body ρ} q e r =
+V-rel-mono (arr X Y) {rv = clo body ρ} q e (img , r) =
+  (λ a o → InImg-mono q e (img a o)) ,
   λ W'' q' φ'' e' a ra ar → r W'' (≤W-trans q q') φ'' (Ext-trans q e e') a ra ar
 V-rel-mono (arr X Y) {rv = num _}  q e ()
 V-rel-mono (arr X Y) {rv = unit}   q e ()
@@ -345,6 +390,18 @@ V-rel-upE : ∀ {k N} (s : k ≤′ N) {X : STy k} {W φ v rv} →
             V-rel k X W φ v rv → V-rel N (↑≤ s X) (extendE s W) φ (upE s v) rv
 V-rel-upE ≤′-refl     r = r
 V-rel-upE (≤′-step s) r = V-rel-upE s r
+
+-- Every address in a related runtime value is the address of a cell.
+Occ-img : ∀ {k} (X : STy k) {W : World k} {φ v rv a} →
+          V-rel k X W φ v rv → Occ rv a → InImg W φ a
+Occ-img nat  refl ()
+Occ-img unit refl ()
+Occ-img (↑ X)   {W , L} {φ} r o = InImg-below {L = L} {φ = φ} (Occ-img X r o)
+Occ-img (ref X) {W , L} {φ} {x} refl o-loc = _ , X , top x , refl
+Occ-img (arr X Y) {rv = clo body ρ} (img , _) (o-clo oe) = img _ oe
+Occ-img (arr X Y) {rv = num _} () o
+Occ-img (arr X Y) {rv = unit}  () o
+Occ-img (arr X Y) {rv = loc _} () o
 
 lookup-map : ∀ {X : Set} {P Q : X → Set} (f : ∀ {x} → P x → Q x) {xs : List X}
              (cs : All P xs) {x} (i : x ∈ xs) →
@@ -773,6 +830,16 @@ EnvRel-shift {Γ = (i , A) ∷ Γ} {ρ = (q , v) ∷ ρ} {_ ∷ _} (c ∷ cs) s 
           (V-rel-cast (trans (lift-irr q (≤′-trans c s)) (sym (lift-trans c s))) vr)))) ,
   EnvRel-shift cs s r e er
 
+-- The addresses in an environment whose variables are at levels ≤ k are
+-- cells of the lowest k layers.
+EnvOcc : ∀ {N Γ k} {W : World N} {φ} {ρ : Env N Γ W} {ρR : REnv Γ}
+         (cs : Below Γ k) (s : k ≤′ N) → EnvRel W φ ρ ρR →
+         ∀ {a} → OccEnv ρR a → InImg (lowerW s W) φ a
+EnvOcc {Γ = (i , A) ∷ Γ} {ρ = (q , v) ∷ ρ} {_ ∷ _} (c ∷ cs) s (vr , er) (o-hd o) =
+  Occ-img (↑≤ c ⌜ A ⌝)
+    (V-rel-down s (V-rel-cast (trans (lift-irr q (≤′-trans c s)) (sym (lift-trans c s))) vr)) o
+EnvOcc {ρ = _ ∷ _} {_ ∷ _} (c ∷ cs) s (_ , er) (o-tl oe) = EnvOcc cs s er oe
+
 ------------------------------------------------------------------------
 -- The fundamental theorem
 ------------------------------------------------------------------------
@@ -785,7 +852,7 @@ BodyP _            _  _  _   _  = ⊥
 applyRel : ∀ {k} {X Y : STy k} {W φ} (g : Val k (arr X Y) W) (rf : RVal) a ra →
            V-rel k (arr X Y) W φ g rf → V-rel k X W φ a ra →
            ⊢Sim k Y W φ (g W ≤W-refl a) (BodyP rf ra)
-applyRel {W = W} {φ} g (clo body ρ) a ra vg va = sim (vg W ≤W-refl φ Ext-refl a ra va)
+applyRel {W = W} {φ} g (clo body ρ) a ra (_ , vg) va = sim (vg W ≤W-refl φ Ext-refl a ra va)
 applyRel g (num _) a ra () va
 applyRel g unit    a ra () va
 applyRel g (loc _) a ra () va
@@ -808,7 +875,8 @@ fundamental {Γ} ⟨⟩ b φ ρ ρR er =
 fundamental (lam {A = A} {B} θ p q c d) {N} b {W} φ ρ ρR er =
   Sim-ret {X = ↑≤ s (arr (↑≤ p ⌜ A ⌝) (↑≤ q ⌜ B ⌝))} {rv = clo d (proj θ ρR)}
     (V-rel-up s {X = arr (↑≤ p ⌜ A ⌝) (↑≤ q ⌜ B ⌝)}
-      (λ Wk r φk e a ra ar → run (
+      ((λ a oe → EnvOcc c s (EnvRel-proj θ er) oe) ,
+       λ Wk r φk e a ra ar → run (
         Sim-localC s {X = ↑≤ q ⌜ B ⌝}
           (Sim-cast (trans (lift-irr (fit d bd) (≤′-trans q s)) (sym (lift-trans q s)))
             (fundamental d bd φk
@@ -980,3 +1048,45 @@ adequacy d with ⟦ d ⟧ ≤-refl {emptyW (lvl d)} [] (emptyH (lvl d))
               | run (fundamental d ≤-refl (λ _ → 0) [] [] tt) (emptyH (lvl d)) [] (Inv-empty (lvl d))
 ... | W , q , h , v | φ , rh , rv , ev , _ , _ , vr , _ =
   rh , subst (Eval [] [] d rh) (V-rel-down (fit d ≤-refl) vr) ev
+
+-- Space -------------------------------------------------------------------------
+
+-- The world below a cell
+underL : ∀ {k} {W : World k} {j A} → Loc W j A → World j
+underL {W = W , L} (top x)   = W
+underL {W = W , L} (below l) = underL l
+
+InImg-under : ∀ {k} {W : World k} {j A φ a} (l : Loc W j A) →
+              InImg (underL l) φ a → InImg W φ a
+InImg-under {W = W , L} {φ = φ} (top x)   i = InImg-below {L = L} {φ = φ} i
+InImg-under {W = W , L} {φ = φ} (below l) i = InImg-below {L = L} {φ = φ} (InImg-under {φ = φ} l i)
+
+HRel-lookup : ∀ {k} {W : World k} {φ h rh j A} (l : Loc W j A) → HRel k W φ h rh →
+              Σ[ v ∈ Val j A (underL l) ] Σ[ rv ∈ RVal ]
+                rh ! φ (key l) ≡ just rv × V-rel j A (underL l) φ v rv
+HRel-lookup {W = W , L} {h = h , cs} (top x) (hr , tops) =
+  let (rv , look , vr) = tops x in All.lookup cs x , rv , look , vr
+HRel-lookup {W = W , L} {h = h , cs} (below l) (hr , tops) = HRel-lookup l hr
+
+-- Every address reachable from a related value, through a related heap,
+-- is the address of a cell.
+reach-img : ∀ {k} {W : World k} {φ h rh} → HRel k W φ h rh →
+            ∀ {k'} (X : STy k') {W' : World k'} {v rv a} →
+            (∀ {b} → InImg W' φ b → InImg W φ b) →
+            V-rel k' X W' φ v rv → Reach rh rv a → InImg W φ a
+reach-img hr X emb vr (r-occ o) = emb (Occ-img X vr o)
+reach-img {φ = φ} {rh = rh} hr X emb vr (r-step o look r) with emb (Occ-img X vr o)
+... | j , A , l , eq with HRel-lookup l hr
+...   | v' , rv' , look' , vr' with trans (sym look') (trans (cong (rh !_) eq) look)
+...     | refl = reach-img hr A (InImg-under {φ = φ} l) vr' r
+
+-- The live runtime heap is no larger than the semantic heap: every runtime
+-- cell reachable from the result is the image of a semantic cell, under an
+-- injective map.
+live-in-image : ∀ {i} {A : Ty i} (d : [] ⊢ A) →
+  let (W , _ , h , v) = ⟦ d ⟧ ≤-refl {emptyW (lvl d)} [] (emptyH (lvl d)) in
+  Σ[ φ ∈ Map ] Σ[ rh ∈ RHeap ] Σ[ rv ∈ RVal ]
+    Eval [] [] d rh rv × Inj W φ × (∀ a → Reach rh rv a → InImg W φ a)
+live-in-image {A = A} d =
+  let (φ , rh , rv , ev , (hr , inj , _) , vr) = simulation d
+  in φ , rh , rv , ev , inj , (λ a r → reach-img hr (↑≤ (fit d ≤-refl) ⌜ A ⌝) (λ i → i) vr r)
