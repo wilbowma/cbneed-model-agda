@@ -44,7 +44,7 @@
 \newcommand{\Val}{\mathit{Val}}
 \newcommand{\Loc}{\mathit{Loc}}
 
-\title{Sharing is not intensionally macro-expressible\\
+\title{Sharing is not heap-adequately expressible\\
        in predicative type theory}
 \author{}
 \date{Draft}
@@ -60,9 +60,11 @@
   accident of one construction. A semantic heap of thunks is an instance of
   the type-world circularity, and a single program, $P = \slam{g} g\,(\slam{n}
   g\,(\slam{m} m))$, defeats every well-founded stratification of it. We
-  make the claim precise as a failure of \emph{intensional
-  macro-expressibility}: Felleisen's homomorphic translations, required to
-  preserve types and to preserve the heap. Target cells must correspond one
+  make the claim precise as a failure of \emph{heap-adequate
+  expressibility}: compositional translations, required to preserve types
+  and to preserve the heap. Unlike Felleisen's macro-expressibility, the
+  translation may reinterpret every construct, so store-passing is allowed;
+  like it, each construct must map to a fixed context. Target cells must correspond one
   to one with live source cells, with related contents. Heap adequacy is how
   the definition sees \emph{sharing}: a translation that recomputes instead
   of sharing needs either a missing cell or two cells where the source has
@@ -97,12 +99,14 @@ This note asks what that gap means. Our answers:
   \item $P$ defeats every well-founded measure on that circularity, not just
     universe levels (\S\ref{sec:obstruction}).
   \item The gap is invisible to observational notions of expressiveness. A
-    heap-sensitive variant of Felleisen's macro-expressibility captures it.
+    heap-sensitive notion, which we call heap-adequate expressibility,
+    captures it. Unlike Felleisen's macro-expressibility, it allows
+    store-passing translations, which both sides of our comparison need.
     The feature it isolates is sharing, which is what makes call-by-need
     cheaper than call-by-name (\S\ref{sec:cost}, \S\ref{sec:def}).
   \item Under that notion we conjecture that $\lpr$ is expressible in
     predicative type theory and call-by-need STLC is not
-    (\S\ref{sec:conj}). The dividing line is Felleisen's homomorphism
+    (\S\ref{sec:conj}). The dividing line is the compositionality
     condition: a translation may use the translations of subterms, but not
     their syntax.
 \end{itemize}
@@ -322,6 +326,30 @@ The cost-sensitive view of correctness is standard:
     \todo{Check the author list and venue of Thunks and Debits, and that the step-indexing claim is fair.}
 \end{itemize}
 
+\paragraph{Expressiveness and asymptotic cost.}
+Closer to our question, several results separate languages by complexity
+rather than by what they compute. Pippenger gives an online problem that
+impure, eager Lisp solves in linear time and shows that pure, eager Lisp
+needs $\Omega(n \log n)$~\cite{pippenger1997}. Bird, Jones and de Moor show
+that laziness closes the gap: a lazy pure program solves the same problem
+in linear time~\cite{bird1997}. That is the phenomenon we study: sharing
+recovers, without observable state, efficiency that pure call-by-value
+cannot reach. Hillerstr\"om, Lindley and Longley prove an analogous
+separation for effect handlers: generic count takes $O(2^n)$ with
+handlers and $\Omega(n2^n)$ in a pure PCF-like language~\cite{hillerstrom2020}.
+Hillerstr\"om also observes that typed macro-expressibility is too coarse
+to see such differences. His macro translation of deep handlers into shallow
+handlers is correct and typed, yet asymptotically slower, because the
+handlers it introduces accumulate~\cite{hillerstrom2021}.
+\todo{Verify Pippenger (problem, bounds, venue: POPL 1996 / TOPLAS 1997) and Bird--Jones--de Moor (JFP 1997; linear-time lazy solution), cited from memory. Check the generic count bounds in Hillerstr\"om--Lindley--Longley.}
+
+These separations are stronger than ours in one respect: they quantify over
+all target programs, not only compositional translations. They are weaker
+in another: they are about one problem's time, while heap adequacy
+constrains every program's heap. A complexity separation for call-by-need
+STLC against predicative type theory would need a cost model for type
+theory, which is the problem heap adequacy avoids (\S\ref{sec:def}).
+
 \paragraph{Reflecting cost versus preserving it.}
 A semantics may \emph{reflect} cost, if its denotation computes the cost,
 or a translation may \emph{preserve} cost, if running it in the host has the
@@ -355,7 +383,7 @@ call-by-need, never computing anything twice, then follow from sharing
 rather than being a separate condition. This also makes the condition
 checkable by a simulation proof, without a cost model for the target.
 
-\section{Intensional macro-expressibility}
+\section{Heap-adequate expressibility}
 \label{sec:def}
 
 Felleisen~\cite{felleisen1991} calls a construct $F$ of a conservative
@@ -373,20 +401,45 @@ Taken directly:
     are equivalent in a pure language and not once $\new$ exists. This is
     equally true of ML, and has nothing to do with stratification.
 \end{itemize}
-Neither sees the intensional gap. We keep the homomorphism condition and
-change what must be preserved.
+Neither sees the intensional gap. Macro-expressibility is also too strict
+in the wrong place. It requires the translation to fix the pure constructs,
+so any feature whose translation must thread state through the whole
+program fails it. Both sides of our comparison need that threading:
+$\lpr$'s references do, and so do call-by-need's shared memo cells once
+the heap must be preserved. Under Felleisen's definition both fail, for a
+reason that has nothing to do with stratification.
 
-\begin{definition}[Intensional macro-expressibility]
-  A source language $L$ with a heap is \emph{intensionally
-  macro-expressible} in a type theory $\mathcal{T}$ if there is a
+We therefore leave macro-expressibility behind and define a different
+notion. It keeps Felleisen's insistence that the translation be
+compositional, with a fixed context per construct, but lets every construct
+be reinterpreted, and it adds a heap condition.
+
+\paragraph{Locality.} The literature distinguishes degrees of locality.
+A \emph{macro-local} translation, Felleisen's original notion, is the
+identity on constructs outside the feature and translates each feature
+construct by a fixed context. A \emph{feature-local} translation is also
+the identity outside the feature, but places no restriction on how the
+feature itself is translated: a translation from named variables to de
+Bruijn indices is feature-local but not macro-local. Neither admits
+state-passing or CPS, which rewrite every construct~\cite{forster2017,lindley2016}.
+\todo{Find and cite the source of the macro-local/feature-local terminology (quoted in notes.md); it cites Kawahara and Kameyama and Lindley for the idea. Check the Lindley citation.}
+Our notion is orthogonal to both. It is weaker outside the feature, since
+every construct may be reinterpreted. It is as strong as macro-locality on
+the feature, since each construct must map to a fixed context, which rules
+out codes (see the remark on codes below). Up to the heap condition, it asks for a
+compositional, typed model of the source in the target.
+
+\begin{definition}[Heap-adequate expressibility]
+  A source language $L$ with a heap is \emph{heap-adequately
+  expressible} in a type theory $\mathcal{T}$ if there is a
   translation $\varphi$ that is
   \begin{enumerate}
     \item \emph{typed}: source types map to $\mathcal{T}$ types, and
       well-typed terms to well-typed terms;
-    \item \emph{homomorphic}: each construct maps to a fixed
+    \item \emph{compositional}: each construct maps to a fixed
       $\mathcal{T}$-context applied to the translations of its immediate
-      subterms, never to their syntax. Pure constructs may change, so
-      store-passing translations are allowed;
+      subterms, never to their syntax. Unlike Felleisen's definition, pure
+      constructs may change too, so store-passing translations are allowed;
     \item \emph{heap-adequate}: whenever a subterm is evaluated, in a
       related environment and from related heaps, the source run and the
       target computation agree in the following sense.
@@ -415,13 +468,21 @@ on the final heap alone would say nothing about how it got there.
   it shows up in time.
 \end{remark}
 
-\begin{remark}[Homomorphism excludes codes]
+\begin{remark}[Compositionality excludes codes]
+  \label{rem:codes}
   The syntactic model is typed and heap-adequate, and its fundamental lemma
   is compositional on typing derivations. But the case for $\prom{e}$ stores
   the closure $\mathit{thunk}\;e\;\rho$, the syntax of $e$, rather than the
-  denotation of $e$. It is homomorphic only in a target with quotation. The
-  line between a shallow model and syntax in the heap is exactly Felleisen's
-  homomorphism condition.
+  denotation of $e$. It is compositional only in a target with quotation.
+  The line between a shallow model and syntax in the heap is exactly the
+  fixed-context condition.
+
+  The condition is needed, not just tasteful. A feature-local translation,
+  unrestricted on the feature, could send $\prom{e}$ to an interpreter
+  applied to the code of $e$. Call-by-need STLC is total, so that
+  interpreter exists in $\mathcal{T}$: it is the syntactic model. Without
+  the condition, part~2 of the conjecture below would be false, and the
+  notion would collapse to ``has a terminating interpreter''.
 \end{remark}
 
 \begin{remark}[No cost model needed]
@@ -444,7 +505,7 @@ on the final heap alone would say nothing about how it got there.
   with a cumulative hierarchy of universes and strictly positive inductive
   families, whose definitions are structurally recursive.
   \begin{enumerate}
-    \item $\lpr$ is intensionally macro-expressible in $\mathcal{T}$.
+    \item $\lpr$ is heap-adequately expressible in $\mathcal{T}$.
     \item Call-by-need STLC is not.
   \end{enumerate}
 \end{conjecture}
@@ -458,7 +519,7 @@ Agda. Agda's type theory is an instance of $\mathcal{T}$.
   \leavevmode
   \begin{enumerate}
     \item (\texttt{LambdaPR.agda}) There is a translation of $\lpr$ typing
-      derivations into Agda that is typed and homomorphic. Each type denotes
+      derivations into Agda that is typed and compositional. Each type denotes
       an Agda type indexed by a stratified world. Each term denotes a
       store-passing Agda function over an explicit heap of semantic values,
       in which $\new$, $\deref$ and $\assign$ are cell allocation, lookup and
@@ -484,8 +545,8 @@ Agda. Agda's type theory is an instance of $\mathcal{T}$.
   \end{enumerate}
 \end{theorem}
 
-The translation is typed and homomorphic by part~1, and heap-adequate by
-parts~2 and~4, so $\lpr$ is intensionally macro-expressible in Agda's type
+The translation is typed and compositional by part~1, and heap-adequate by
+parts~2 and~4, so $\lpr$ is heap-adequately expressible in Agda's type
 theory. For a closed program, part~4 specializes to
 \texttt{live-in-image}: the live runtime heap is no larger than the final
 semantic heap, and the semantic heap is no larger than the runtime heap.
@@ -564,7 +625,7 @@ its consequence, and needs a cost model for the target that type theory does
 not have. A time bound also cannot be stated inside the type theory, because
 evaluation cost is not observable there. The internal substitute, a step
 counter proved equal to the operational step count, is close to true by
-construction for a homomorphic translation, so it would add little.
+construction for a compositional translation, so it would add little.
 
 \paragraph{Remark: the shallow model's run-time cost.}
 Separately from the definition, it is worth recording that the current
@@ -628,7 +689,7 @@ needs.
 \paragraph{Toward a proof.}
 The positive part is a construction. The negative part needs care, because
 type theory can encode things: the syntactic model is itself a type-theoretic
-definition, with codes for thunks. The proof must use homomorphism to rule
+definition, with codes for thunks. The proof must use compositionality to rule
 out codes, not positivity alone. One route: from heap adequacy at $P$,
 extract a single type $D(g)$ for the contents of $g$'s cell. That type must
 appear negatively in the type of the heaps it reads. Then show that no
@@ -703,6 +764,8 @@ the live roots, including the continuation's environment.
   2007.
 \bibitem{ariola1995} Z.~Ariola, M.~Felleisen, J.~Maraist, M.~Odersky,
   P.~Wadler. A call-by-need lambda calculus. POPL 1995.
+\bibitem{bird1997} R.~Bird, G.~Jones, O.~de~Moor. More haste, less speed:
+  lazy versus eager evaluation. \emph{J.\ Funct.\ Program.} 7(5), 1997.
 \bibitem{coquand1990} T.~Coquand, C.~Paulin-Mohring. Inductively defined
   types. COLOG-88, LNCS 417, 1990.
 \bibitem{danielsson2008} N.~A.~Danielsson. Lightweight semiformal time
@@ -719,10 +782,18 @@ the live roots, including the continuation's environment.
   call-by-value. ICFP 2019.
 \bibitem{kammar2017} O.~Kammar, P.~B.~Levy, S.~K.~Moss, S.~Staton. A monad
   for full ground reference cells. LICS 2017.
+\bibitem{hillerstrom2020} D.~Hillerstr\"om, S.~Lindley, J.~Longley.
+  Effects for efficiency: asymptotic speedup with first-class control.
+  \emph{Proc.\ ACM Program.\ Lang.} 4(ICFP):100, 2020.
+\bibitem{hillerstrom2021} D.~Hillerstr\"om. \emph{Foundations for
+  Programming and Implementing Effect Handlers}. PhD thesis, University of
+  Edinburgh, 2021.
 \bibitem{koronkevich2025} P.~Koronkevich, W.~J.~Bowman. Type universes as
   Kripke worlds. ICFP 2025.
 \bibitem{launchbury1993} J.~Launchbury. A natural semantics for lazy
   evaluation. POPL 1993.
+\bibitem{lindley2016} S.~Lindley. Delimited continuations, macro
+  expressiveness, and effect handlers. Talk, Shonan Meeting 103, 2016.
 \bibitem{moran1999} A.~Moran, D.~Sands. Improvement in a lazy context: an
   operational theory for call-by-need. POPL 1999.
 \bibitem{okasaki1998} C.~Okasaki. \emph{Purely Functional Data Structures}.
@@ -731,6 +802,8 @@ the live roots, including the continuation's environment.
   conversion is safe for space. ICFP 2019.
 \bibitem{pedrot2020} P.-M.~P\'edrot, N.~Tabareau. The fire triangle: how
   to mix substitution, dependent elimination, and effects. POPL 2020.
+\bibitem{pippenger1997} N.~Pippenger. Pure versus impure Lisp.
+  \emph{ACM Trans.\ Program.\ Lang.\ Syst.} 19(2), 1997.
 \bibitem{pottier2024} F.~Pottier, A.~Gu\'eneau, J.-H.~Jourdan, G.~M\'evel.
   Thunks and debits in separation logic with time credits. POPL 2024.
 \bibitem{reynolds1984} J.~C.~Reynolds. Polymorphism is not set-theoretic.
